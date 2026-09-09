@@ -6,15 +6,15 @@ experiment:
   trials: 5000
   batch_size: 2000
   batches: 200
-  budget_steps: 2
+  budget_steps: 3
   budget_ranges:
-    synthetic_regression: [12.0, 13.0]
+    synthetic_regression: [10.0, 12.0]
     california_housing: [1.5, 2.0]
-    superconductivity: [34.0, 35.0]
+    superconductivity: [32.0, 34.0]
   match_tscp_C_ranges:
-    synthetic_regression: [13.0, 13.0]
+    synthetic_regression: [11.0, 11.0]
     california_housing: [2.0, 2.0]
-    superconductivity: [35.0, 35.0]
+    superconductivity: [33.0, 33.0]
   match_coverage_tolerance: 0.004
   variants:
     - { name: "TsCP", method: tscp, delta: 0.001 }
