@@ -6,6 +6,7 @@ import numpy as np
 from tscp.experiments import (
     collect_compare,
     collect_loo_compare_ecp,
+    collect_model_ablation,
     collect_self_validation,
     loo_compare_report_table,
     loo_coverage_report_table,
@@ -87,6 +88,29 @@ def test_self_validation_collector_on_small_synthetic_data(tmp_path):
         "figure.pdf", "figure.png", "SyntheticRegression.pdf", "SyntheticRegression.png",
     ):
         assert (tmp_path / name).is_file()
+
+
+def test_model_ablation_uses_independent_mc_theory_without_loo():
+    root = Path(__file__).resolve().parents[2]
+    config = load_config(root / "configs" / "experiments" / "model_ablation_regression.yaml")
+    config["datasets"] = ["synthetic_regression"]
+    config["seeds"] = [0]
+    config["experiment"]["models"] = ["ridge"]
+    config["experiment"]["empirical_trials"] = 3
+    config["experiment"]["reference_trials"] = 4
+    config["data"].update({"max_samples": 800, "total_calibration_sizes": [60]})
+    config["budget"] = {"type": "constant", "value": 10.0}
+
+    frame = collect_model_ablation(config)
+
+    assert len(frame) == 1
+    row = frame.iloc[0]
+    assert row.empirical_trials == 3
+    assert row.reference_trials == 4
+    np.testing.assert_allclose(row.corrected_bound, row.reference_coverage)
+    np.testing.assert_allclose(
+        row.corrected_bound, 1.0 - row.expected_alpha - row.expected_delta,
+    )
 
 
 def test_loo_comparison_uses_one_random_test_point_per_trial():

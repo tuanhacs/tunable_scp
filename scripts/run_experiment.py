@@ -48,6 +48,8 @@ def main() -> Path:
             config["experiment"].pop("budget_values", None)
         if config.get("experiment", {}).get("type") == "model_ablation":
             config["experiment"]["models"] = ["ridge"] if task == "regression" else ["logistic"]
+            config["experiment"]["empirical_trials"] = 3
+            config["experiment"]["reference_trials"] = 4
         if config.get("experiment", {}).get("type") == "loo_histogram":
             config["experiment"]["trials"] = 3
             config["experiment"]["bins"] = 5

@@ -133,6 +133,13 @@ python scripts/run_suite.py --suite configs/suites/main_paper.yaml --smoke
 | `loo_validation_*.yaml` | Histograms of independent-test coverage and the corrected LOO estimate `1-alpha_hat_LOO-delta_hat_LOO` |
 | `loo_compare_ecp_*.yaml` | LOO-estimator variance tables and estimated-vs-empirical coverage-gap figures |
 
+Model ablations use no LOO coverage estimate. Each model is fitted once per
+outer seed. For every calibration size, `experiment.empirical_trials`
+independent trials redraw the complete calibration pair `(D1, D2)` and one test
+observation to estimate empirical coverage and mean set size. A disjoint
+`experiment.reference_trials` stream estimates `E[alpha]` and `E[delta]`, and
+the dashed theoretical curve is `1 - E[alpha] - E[delta]`.
+
 Delta ablations support dataset-specific linspace grids via
 `experiment.delta_ranges.<dataset>: [start, stop]` and
 `experiment.delta_steps`. Both endpoints are included. An explicit legacy
