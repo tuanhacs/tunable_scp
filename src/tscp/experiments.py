@@ -1018,9 +1018,9 @@ def loo_coverage_report_table(summary: pd.DataFrame) -> pd.DataFrame:
 def coverage_matched_compare_points(
     frame: pd.DataFrame, config: dict,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Select raw batch points using the notebook's coverage-tolerance rule."""
+    """Select raw points around coverage induced by a chosen TsCP budget."""
     experiment = config.get("experiment", {})
-    configured_ranges = experiment.get("match_ecp_C_ranges", {})
+    configured_ranges = experiment.get("match_tscp_C_ranges", {})
     tolerance_config = experiment.get("match_coverage_tolerance", 0.005)
     point_rows = []
     summary_rows = []
@@ -1038,10 +1038,10 @@ def coverage_matched_compare_points(
         tscp = dataset_points[dataset_points.variant == tscp_name]
 
         if dataset not in configured_ranges:
-            raise ValueError(f"Missing match_ecp_C_ranges.{dataset} for coverage matching.")
+            raise ValueError(f"Missing match_tscp_C_ranges.{dataset} for coverage matching.")
         bounds = configured_ranges[dataset]
         if not isinstance(bounds, (list, tuple)) or len(bounds) != 2:
-            raise ValueError(f"match_ecp_C_ranges.{dataset} must contain [C_min, C_max].")
+            raise ValueError(f"match_tscp_C_ranges.{dataset} must contain [C_min, C_max].")
         c_min, c_max = map(float, bounds)
         if not np.isfinite(c_min) or not np.isfinite(c_max) or c_min > c_max:
             raise ValueError(f"Invalid eCP budget interval for {dataset}: {bounds}.")
@@ -1052,25 +1052,25 @@ def coverage_matched_compare_points(
         if not np.isfinite(tolerance) or tolerance < 0:
             raise ValueError("match_coverage_tolerance must be finite and non-negative.")
         reference_budgets = np.sort(
-            ecp.loc[ecp.budget.between(c_min, c_max), "budget"].unique()
+            tscp.loc[tscp.budget.between(c_min, c_max), "budget"].unique()
         )
         if len(reference_budgets) == 0:
             raise ValueError(
-                f"No evaluated eCP budget for {dataset} lies in [{c_min}, {c_max}]."
+                f"No evaluated TsCP budget for {dataset} lies in [{c_min}, {c_max}]."
             )
 
         for reference_budget in reference_budgets:
-            ecp_at_budget = ecp[np.isclose(ecp.budget, reference_budget)]
-            target_coverage = float(ecp_at_budget.coverage.mean())
-            ecp_size_mean = float(ecp_at_budget.average_size.mean())
-            matched_ecp = ecp_at_budget[
-                (ecp_at_budget.coverage - target_coverage).abs() <= tolerance
+            tscp_at_budget = tscp[np.isclose(tscp.budget, reference_budget)]
+            target_coverage = float(tscp_at_budget.coverage.mean())
+            tscp_size_mean = float(tscp_at_budget.average_size.mean())
+            matched_tscp = tscp_at_budget[
+                (tscp_at_budget.coverage - target_coverage).abs() <= tolerance
             ]
-            matched_tscp = tscp[(tscp.coverage - target_coverage).abs() <= tolerance]
-            if matched_tscp.empty:
-                minimum_gap = float((tscp.coverage - target_coverage).abs().min())
+            matched_ecp = ecp[(ecp.coverage - target_coverage).abs() <= tolerance]
+            if matched_ecp.empty:
+                minimum_gap = float((ecp.coverage - target_coverage).abs().min())
                 raise ValueError(
-                    f"No TsCP batch point matches {dataset} at eCP C={reference_budget:g} "
+                    f"No eCP batch point matches {dataset} at TsCP C={reference_budget:g} "
                     f"within tolerance={tolerance:g}; the smallest observed gap is "
                     f"{minimum_gap:g}."
                 )
@@ -1081,8 +1081,8 @@ def coverage_matched_compare_points(
                     point_rows.append({
                         "dataset": dataset,
                         "match_id": match_id,
-                        "reference_ecp_budget": float(reference_budget),
-                        "target_ecp_coverage": target_coverage,
+                        "reference_tscp_budget": float(reference_budget),
+                        "target_tscp_coverage": target_coverage,
                         "coverage_tolerance": tolerance,
                         "method": method_name,
                         "variant": str(point.variant),
@@ -1093,18 +1093,18 @@ def coverage_matched_compare_points(
                         "absolute_coverage_gap": abs(float(point.coverage) - target_coverage),
                     })
 
-            tscp_coverage_mean = float(matched_tscp.coverage.mean())
-            tscp_size_mean = float(matched_tscp.average_size.mean())
+            ecp_coverage_mean = float(matched_ecp.coverage.mean())
+            ecp_size_mean = float(matched_ecp.average_size.mean())
             reduction = ecp_size_mean - tscp_size_mean
             summary_rows.append({
                 "dataset": dataset,
                 "match_id": match_id,
                 "selection": "raw_points_within_tolerance",
-                "reference_ecp_budget": float(reference_budget),
+                "reference_tscp_budget": float(reference_budget),
                 "target_coverage": target_coverage,
-                "ecp_mean_coverage": target_coverage,
-                "tscp_mean_coverage": tscp_coverage_mean,
-                "coverage_gap": abs(tscp_coverage_mean - target_coverage),
+                "ecp_mean_coverage": ecp_coverage_mean,
+                "tscp_mean_coverage": target_coverage,
+                "coverage_gap": abs(ecp_coverage_mean - target_coverage),
                 "coverage_tolerance": tolerance,
                 "ecp_variant": ecp_name,
                 "ecp_points": int(len(matched_ecp)),
@@ -1386,8 +1386,8 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
                 marker="D", color="tab:red", s=80, zorder=4,
                 label="TsCP mean" if col == 0 else "_nolegend_",
             )
-            for target_coverage in summary.ecp_mean_coverage:
-                ax.axvline(target_coverage, color="tab:blue", linestyle="--", alpha=0.4)
+            for target_coverage in summary.tscp_mean_coverage:
+                ax.axvline(target_coverage, color="tab:orange", linestyle="--", alpha=0.4)
             ax.set_title(_dataset_display_name(dataset))
             ax.grid(alpha=0.25)
             if col == 0:

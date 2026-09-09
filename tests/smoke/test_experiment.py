@@ -26,7 +26,7 @@ def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool(tmp_path):
     config["experiment"]["batches"] = 3
     config["experiment"]["budget_steps"] = 2
     config["experiment"]["budget_ranges"] = {"synthetic_regression": [6.0, 10.0]}
-    config["experiment"]["match_ecp_C_ranges"] = {"synthetic_regression": [6.0, 10.0]}
+    config["experiment"]["match_tscp_C_ranges"] = {"synthetic_regression": [6.0, 10.0]}
     config["experiment"]["match_coverage_tolerance"] = 1.0
     config["data"].update({"max_samples": 800, "total_calibration_size": 60})
 

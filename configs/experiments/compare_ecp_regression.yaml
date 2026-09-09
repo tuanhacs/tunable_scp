@@ -11,7 +11,7 @@ experiment:
     synthetic_regression: [12.0, 13.0]
     california_housing: [1.5, 2.0]
     superconductivity: [34.0, 35.0]
-  match_ecp_C_ranges:
+  match_tscp_C_ranges:
     synthetic_regression: [13.0, 13.0]
     california_housing: [2.0, 2.0]
     superconductivity: [35.0, 35.0]

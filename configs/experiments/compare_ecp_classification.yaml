@@ -13,8 +13,8 @@ experiment:
     synthetic_classification: [14, 18]
     mnist: [2, 5]
     covertype: [2, 5]
-  # Edit these intervals to select which eCP budgets are coverage-matched.
-  match_ecp_C_ranges:
+  # Edit these intervals to select which TsCP budgets define target coverage.
+  match_tscp_C_ranges:
     synthetic_classification: [14, 18]
     mnist: [2, 5]
     covertype: [2, 5]
