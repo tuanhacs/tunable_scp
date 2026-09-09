@@ -4,6 +4,7 @@ from tscp.config import load_config
 import numpy as np
 
 from tscp.experiments import (
+    collect_compare,
     collect_loo_compare_ecp,
     collect_self_validation,
     loo_compare_report_table,
@@ -11,6 +12,29 @@ from tscp.experiments import (
     make_figures,
     summarize_loo_compare,
 )
+
+
+def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool():
+    root = Path(__file__).resolve().parents[2]
+    config = load_config(root / "configs" / "experiments" / "compare_ecp_regression.yaml")
+    config["datasets"] = ["synthetic_regression"]
+    config["seeds"] = [0]
+    config["model"] = {"mean": "ridge", "scale": "ridge"}
+    config["experiment"]["trials"] = 10
+    config["experiment"]["batch_size"] = 5
+    config["experiment"]["batches"] = 3
+    config["experiment"]["budget_steps"] = 2
+    config["experiment"]["budget_ranges"] = {"synthetic_regression": [6.0, 10.0]}
+    config["data"].update({"max_samples": 800, "total_calibration_size": 60})
+
+    frame = collect_compare(config)
+
+    assert len(frame) == 2 * len(config["experiment"]["variants"]) * 3
+    assert set(frame["base_trials"]) == {10}
+    assert set(frame["batch_size"]) == {5}
+    assert set(frame["batch"]) == {0, 1, 2}
+    assert frame.groupby(["seed", "budget", "variant", "batch"]).size().eq(1).all()
+    assert frame["coverage"].between(0.0, 1.0).all()
 
 
 def test_self_validation_collector_on_small_synthetic_data(tmp_path):

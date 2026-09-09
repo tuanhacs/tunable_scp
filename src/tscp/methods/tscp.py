@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
 
-from ..quantiles import conformal_quantile, validate_alpha_grid
+from ..quantiles import conformal_quantile, conformal_quantiles, validate_alpha_grid
 
 
 @dataclass
@@ -19,8 +19,8 @@ class TsCPClassification:
         self.alpha_grid = validate_alpha_grid(self.alpha_grid)
         if self.delta < 0:
             raise ValueError("delta must be nonnegative.")
-        self.q1_grid = np.asarray([conformal_quantile(self.scores_d1, a) for a in self.alpha_grid])
-        self.q2_grid = np.asarray([conformal_quantile(self.scores_d2, a) for a in self.alpha_grid])
+        self.q1_grid = conformal_quantiles(self.scores_d1, self.alpha_grid)
+        self.q2_grid = conformal_quantiles(self.scores_d2, self.alpha_grid)
 
     def choose_alpha(self, label_scores: np.ndarray, budget: float, scores_d1: np.ndarray | None = None) -> float:
         target = float(budget) - self.delta
@@ -54,8 +54,8 @@ class TsCPRegression:
         self.alpha_grid = validate_alpha_grid(self.alpha_grid)
         if self.delta < 0:
             raise ValueError("delta must be nonnegative.")
-        self.q1_grid = np.asarray([conformal_quantile(self.scores_d1, a) for a in self.alpha_grid])
-        self.q2_grid = np.asarray([conformal_quantile(self.scores_d2, a) for a in self.alpha_grid])
+        self.q1_grid = conformal_quantiles(self.scores_d1, self.alpha_grid)
+        self.q2_grid = conformal_quantiles(self.scores_d2, self.alpha_grid)
 
     def choose_alpha(self, scale: float, budget: float, scores_d1: np.ndarray | None = None) -> float:
         target = float(budget) - self.delta

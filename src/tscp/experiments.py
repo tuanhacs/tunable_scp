@@ -246,21 +246,203 @@ def collect_delta_ablation(config: dict) -> pd.DataFrame:
 
 
 def collect_compare(config: dict) -> pd.DataFrame:
+    """Collect coverage-size operating points from one fitted predictor.
+
+    For each dataset/seed, ``trials`` random calibration--test draws form a
+    common Monte Carlo pool. Each output row aggregates one random subsample of
+    that pool. Methods and budgets share both the base draws and batch indices,
+    which makes their comparison paired. Repeated batches may overlap.
+    """
     rows = []
-    variants = config["experiment"].get("variants", [
+    experiment = config["experiment"]
+    method_config = config.get("method", {})
+    variants = experiment.get("variants", [
         {"name": "TsCP", "method": "tscp", "delta": config["method"].get("delta", 0.1)},
         {"name": "eCP", "method": "ecp"},
     ])
+    trials = int(experiment.get("trials", 2000))
+    if trials < 1:
+        raise ValueError("compare_ecp requires at least one Monte Carlo trial.")
+    batch_size = int(experiment.get("batch_size", trials))
+    batches = int(experiment.get("batches", 1))
+    if not 1 <= batch_size <= trials:
+        raise ValueError("compare_ecp batch_size must satisfy 1 <= batch_size <= trials.")
+    if batches < 1:
+        raise ValueError("compare_ecp batches must be positive.")
+    names = [str(variant["name"]) for variant in variants]
+    if len(names) != len(set(names)):
+        raise ValueError("compare_ecp variant names must be unique.")
+    grid = alpha_grid(config)
+    tie_epsilon = float(method_config.get("tie_break_epsilon", 0.0))
+
+    def budget_values(dataset: str, task: str) -> np.ndarray:
+        ranges = experiment.get("budget_ranges", {})
+        if dataset in ranges:
+            bounds = ranges[dataset]
+            if not isinstance(bounds, (list, tuple)) or len(bounds) != 2:
+                raise ValueError(f"budget_ranges.{dataset} must contain [start, stop].")
+            start, stop = map(float, bounds)
+            if not np.isfinite(start) or not np.isfinite(stop) or start <= 0 or start > stop:
+                raise ValueError(f"budget_ranges.{dataset} must satisfy 0 < start <= stop.")
+            steps_config = experiment.get("budget_steps", 31)
+            steps = int(steps_config.get(dataset, 31) if isinstance(steps_config, dict) else steps_config)
+            if steps < 2:
+                raise ValueError("budget_steps must be at least 2 when using a range.")
+            values = np.linspace(start, stop, steps)
+        else:
+            values = np.asarray(experiment["budget_values"][dataset], dtype=float)
+        # Classification set sizes are integers. Continuous budgets between
+        # adjacent integers yield duplicate operating points after ceil().
+        if task == "classification":
+            values = np.unique(np.ceil(values))
+        return np.asarray(values, dtype=float)
+
     for dataset in config["datasets"]:
-        for seed in config["seeds"]:
-            for budget_value in config["experiment"]["budget_values"][dataset]:
+        for outer_seed in config["seeds"]:
+            task, split, fitted = prepare(config, dataset, int(outer_seed))
+            values = budget_values(dataset, task)
+            total = int(config.get("data", {}).get("total_calibration_size", 2000))
+            if total % 2 or total > len(split.y_cal):
+                raise ValueError("total calibration size must be even and no larger than the pool.")
+            specs = {
+                float(value): budget_for_dataset(config, dataset, value=float(value))
+                for value in values
+            }
+            accumulators = {
+                (str(variant["name"]), float(value)): {"covered": [], "sizes": [], "budgets": []}
+                for variant in variants for value in values
+            }
+
+            if task == "regression":
+                regression_scores = np.abs(split.y_cal - fitted.pred_cal) / np.maximum(fitted.scale_cal, 1e-12)
+                test_uncertainty = normalized_uncertainty(fitted.scale_test, fitted.scale_reference)
+            else:
+                uncertainty_kind = "entropy"
+                base_spec = budget_for_dataset(config, dataset, value=float(values[0]))
+                if base_spec.uncertainty != "auto":
+                    uncertainty_kind = base_spec.uncertainty
+                test_uncertainty = classification_uncertainty(fitted.probs_test, uncertainty_kind)
+                score_types = list(dict.fromkeys(
+                    str(variant.get("score", method_config.get("score", "one_minus_probability")))
+                    for variant in variants
+                ))
+                classification_base_scores = {
+                    score_type: (
+                        classification_scores(fitted.probs_cal, score_type),
+                        classification_scores(fitted.probs_test, score_type),
+                    )
+                    for score_type in score_types
+                }
+
+            for trial in range(trials):
+                trial_seed = int(outer_seed) * 10_000_000 + total * 1_000 + trial
+                rng = np.random.default_rng(trial_seed)
+                selected = rng.choice(len(split.y_cal), total, replace=False)
+                d1, d2 = selected[: total // 2], selected[total // 2 :]
+                test_index = int(rng.integers(0, len(split.y_test)))
+
+                classification_score_cache = {}
                 for variant in variants:
-                    spec = budget_for_dataset(config, dataset, value=float(budget_value))
-                    _, result = evaluate(config, dataset, seed, method=variant["method"], budget=spec,
-                                         delta=variant.get("delta"), score_type=variant.get("score"))
-                    rows.append({"dataset": dataset, "seed": seed, "budget": budget_value, "variant": variant["name"],
-                                 "method": variant["method"], "coverage": result.coverage, "average_size": result.average_size,
-                                 "hard_accuracy": result.hard_constraint_accuracy, **_theory_columns(result)})
+                    variant_name = str(variant["name"])
+                    method_name = str(variant["method"]).lower()
+                    delta = float(variant.get("delta", method_config.get("delta", 0.1)))
+
+                    if task == "regression":
+                        if method_name == "tscp":
+                            method = TsCPRegression(regression_scores[d1], regression_scores[d2], grid, delta)
+                        elif method_name == "ecp":
+                            method = ECPRegression(regression_scores[selected], grid)
+                        else:
+                            raise ValueError(f"Unknown compare_ecp method {method_name!r}.")
+                    else:
+                        score_type = str(variant.get("score", method_config.get("score", "one_minus_probability")))
+                        if score_type not in classification_score_cache:
+                            base_cal, base_test = classification_base_scores[score_type]
+                            selected_scores = base_cal[selected].copy()
+                            test_scores = base_test[test_index].copy()
+                            if tie_epsilon > 0:
+                                score_offset = score_types.index(score_type)
+                                score_rng = np.random.default_rng(trial_seed + 7919 + score_offset)
+                                selected_scores += score_rng.uniform(0.0, tie_epsilon, selected_scores.shape)
+                                test_scores += score_rng.uniform(0.0, tie_epsilon, test_scores.shape)
+                            true_selected = selected_scores[
+                                np.arange(total), split.y_cal[selected].astype(int)
+                            ]
+                            classification_score_cache[score_type] = (
+                                selected_scores, test_scores, true_selected,
+                            )
+                        selected_scores, test_scores, true_selected = classification_score_cache[score_type]
+                        if method_name == "tscp":
+                            method = TsCPClassification(
+                                true_selected[: total // 2], true_selected[total // 2 :], grid, delta,
+                            )
+                        elif method_name == "ecp":
+                            method = ECPClassification(true_selected, grid)
+                        else:
+                            raise ValueError(f"Unknown compare_ecp method {method_name!r}.")
+
+                    for value in values:
+                        spec = specs[float(value)]
+                        test_budget = float(evaluate_budget(
+                            spec, np.asarray([test_uncertainty[test_index]]),
+                            classification=(task == "classification"),
+                        )[0])
+                        if task == "regression":
+                            prediction, _ = method.predict_one(
+                                fitted.pred_test[test_index], fitted.scale_test[test_index], test_budget,
+                            )
+                            covered = float(prediction[0] <= split.y_test[test_index] <= prediction[1])
+                            prediction_size = float(prediction[1] - prediction[0])
+                        else:
+                            prediction, _ = method.predict_one(test_scores, test_budget)
+                            covered = float(prediction[int(split.y_test[test_index])])
+                            prediction_size = float(prediction.sum())
+                        bucket = accumulators[(variant_name, float(value))]
+                        bucket["covered"].append(covered)
+                        bucket["sizes"].append(prediction_size)
+                        bucket["budgets"].append(test_budget)
+
+            # Repeated subsamples of the shared base-trial pool create the
+            # point cloud. A batch is sampled without replacement internally;
+            # different batches may overlap and are therefore not independent.
+            batch_rng = np.random.default_rng(3_000_000_000 + int(outer_seed))
+            batch_indices = [
+                batch_rng.choice(trials, batch_size, replace=False)
+                for _ in range(batches)
+            ]
+
+            for variant in variants:
+                variant_name = str(variant["name"])
+                for value in values:
+                    bucket = accumulators[(variant_name, float(value))]
+                    covered = np.asarray(bucket["covered"], dtype=float)
+                    sizes = np.asarray(bucket["sizes"], dtype=float)
+                    actual_budgets = np.asarray(bucket["budgets"], dtype=float)
+                    for batch, indices in enumerate(batch_indices):
+                        batch_covered = covered[indices]
+                        batch_sizes = sizes[indices]
+                        batch_budgets = actual_budgets[indices]
+                        ddof = 1 if batch_size > 1 else 0
+                        rows.append({
+                            "dataset": dataset,
+                            "seed": int(outer_seed),
+                            "batch": batch,
+                            "budget": float(value),
+                            "average_budget": float(batch_budgets.mean()),
+                            "variant": variant_name,
+                            "method": str(variant["method"]).lower(),
+                            "base_trials": trials,
+                            "batch_size": batch_size,
+                            "coverage": float(batch_covered.mean()),
+                            "coverage_standard_error": float(
+                                batch_covered.std(ddof=ddof) / np.sqrt(batch_size)
+                            ),
+                            "average_size": float(batch_sizes.mean()),
+                            "size_standard_error": float(
+                                batch_sizes.std(ddof=ddof) / np.sqrt(batch_size)
+                            ),
+                            "hard_accuracy": float(np.mean(batch_sizes <= batch_budgets)),
+                        })
     return pd.DataFrame(rows)
 
 
@@ -1011,23 +1193,64 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
                 size_ax.set_ylabel("Average set size")
                 size_ax.legend(loc="best")
                 size_ax.set_xlabel(r"Slack $\delta$")
-    elif kind in {"compare_ecp", "budget_ablation"}:
+    elif kind == "compare_ecp":
+        fig, axes = plt.subplots(
+            1, len(datasets),
+            figsize=_plot_figsize(config, (5.2 * len(datasets), 4.5)),
+            squeeze=False,
+        )
+        frame.sort_values(["dataset", "variant", "seed", "budget", "batch"]).to_csv(
+            output / "compare_ecp_points.csv", index=False,
+        )
+        configured_variants = [str(item["name"]) for item in config["experiment"].get("variants", [])]
+        available_variants = list(dict.fromkeys(frame["variant"].astype(str)))
+        variant_order = configured_variants or available_variants
+        # Put eCP first in the legend and use the visual convention from the
+        # exploratory coverage-size figure.
+        variant_order = sorted(
+            variant_order,
+            key=lambda name: (0 if frame[frame.variant == name].method.iloc[0] == "ecp" else 1, name),
+        )
+        colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        for col, dataset in enumerate(datasets):
+            ax = axes[0, col]
+            for variant_index, variant_name in enumerate(variant_order):
+                part = frame[(frame.dataset == dataset) & (frame.variant == variant_name)]
+                if part.empty:
+                    continue
+                method_name = str(part.method.iloc[0])
+                marker = "x" if method_name == "ecp" else "o"
+                color = "tab:blue" if method_name == "ecp" else "tab:orange"
+                # Additional variants of one method retain their marker but
+                # receive a distinct color after the first two curves.
+                same_method_before = sum(
+                    not frame[frame.variant == previous].empty
+                    and str(frame[frame.variant == previous].method.iloc[0]) == method_name
+                    for previous in variant_order[:variant_index]
+                )
+                if same_method_before:
+                    color = colors[(variant_index + 2) % len(colors)]
+                ax.scatter(
+                    part.coverage, part.average_size,
+                    marker=marker, color=color, s=18, alpha=0.35,
+                    label=variant_name if col == 0 else "_nolegend_",
+                )
+            ax.set_title(_dataset_display_name(dataset))
+            ax.set_xlabel("Empirical Coverage")
+            if col == 0:
+                ax.set_ylabel("Average Size")
+                ax.legend(loc="best")
+    elif kind == "budget_ablation":
         fig, axes = plt.subplots(
             1, len(datasets), figsize=_plot_figsize(config, (6 * len(datasets), 4.5)), squeeze=False,
         )
-        key = "variant" if kind == "compare_ecp" else "budget_type"
-        avg = _mean(frame, ["dataset", key, "method"] + (["budget"] if kind == "compare_ecp" else []), ["coverage", "average_size"])
+        key = "budget_type"
+        avg = _mean(frame, ["dataset", key, "method"], ["coverage", "average_size"])
         for ax, dataset in zip(axes[0], datasets):
             part = avg[avg.dataset == dataset]
             for labels, group in part.groupby([key, "method"]):
-                if kind == "compare_ecp":
-                    ax.plot(group.budget, group.coverage, marker="o", label=" / ".join(labels))
-                else:
-                    ax.plot(group.coverage, group.average_size, marker="o", label=" / ".join(labels))
-            if kind == "compare_ecp":
-                ax.set(title=_dataset_display_name(dataset), xlabel="Pre-chosen set size", ylabel="Coverage")
-            else:
-                ax.set(title=_dataset_display_name(dataset), xlabel="Coverage", ylabel="Average prediction-set size")
+                ax.plot(group.coverage, group.average_size, marker="o", label=" / ".join(labels))
+            ax.set(title=_dataset_display_name(dataset), xlabel="Coverage", ylabel="Average prediction-set size")
     elif kind == "model_ablation":
         fig, axes = plt.subplots(
             2, len(datasets), figsize=_plot_figsize(config, (6 * len(datasets), 8)), squeeze=False,

@@ -139,6 +139,22 @@ Delta ablations support dataset-specific linspace grids via
 `experiment.deltas` list remains supported for datasets without a configured
 range.
 
+The eCP comparison uses dataset-specific `experiment.budget_ranges` and
+`experiment.budget_steps`. By default, each comparison config uses one model
+fit (`seeds: [0]`). For every dataset, `experiment.trials` random calibration
+samples and one random test observation per sample form a shared Monte Carlo
+pool. For every budget, the code repeatedly selects `experiment.batch_size`
+draws from that pool and reports `experiment.batches` empirical coverage--size
+points. eCP and TsCP use the same base draws and the same batch indices.
+
+The figure plots every batch-budget point as empirical coverage versus average
+prediction-set size, and saves the values to `compare_ecp_points.csv` with the
+`batch`, `base_trials`, and `batch_size` columns. A batch is sampled without
+replacement internally, but different batches can overlap; consequently these
+points are useful as a paired visualization and are not independent experiment
+replicates. Classification budgets are ceiled and deduplicated because
+prediction-set cardinality is integer-valued.
+
 Run the revised LOO estimator comparison with:
 
 ```bash

@@ -3,7 +3,7 @@ import pytest
 
 from tscp.methods.ecp import ECPClassification, ECPRegression
 from tscp.methods.tscp import TsCPClassification, TsCPRegression
-from tscp.quantiles import conformal_quantile
+from tscp.quantiles import conformal_quantile, conformal_quantiles
 from tscp.theory.coverage import (
     _loo_quantiles,
     estimate_classification_coverage,
@@ -21,6 +21,13 @@ def test_fast_loo_quantiles_match_explicit_point_deletion():
         for i in range(len(scores))
     ])
     np.testing.assert_allclose(_loo_quantiles(scores, grid), expected)
+
+
+def test_grid_conformal_quantiles_match_scalar_implementation():
+    scores = np.array([0.4, 0.1, 0.4, 0.8, 0.2])
+    grid = np.array([0.01, 0.2, 0.5, 0.8])
+    expected = np.array([conformal_quantile(scores, alpha) for alpha in grid])
+    np.testing.assert_allclose(conformal_quantiles(scores, grid), expected)
 
 
 def test_ecp_regression_loo_matches_explicit_point_deletion():
