@@ -40,12 +40,13 @@ def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool(tmp_path):
     assert frame["coverage"].between(0.0, 1.0).all()
     matched = summarize_coverage_matched_compare(frame, config)
     assert len(matched) == 2
-    assert (matched["selection"] == "nearest_within_tolerance").all()
+    assert (matched["selection"] == "raw_points_within_tolerance").all()
     assert (matched["coverage_gap"] <= matched["coverage_tolerance"]).all()
     make_figures(frame, config, tmp_path)
     for name in (
         "figure.pdf", "figure.png", "coverage_matched.pdf", "coverage_matched.png",
         "compare_ecp_points.csv", "compare_ecp_coverage_matched.csv",
+        "compare_ecp_coverage_matched_points.csv",
     ):
         assert (tmp_path / name).is_file()
 

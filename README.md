@@ -158,12 +158,16 @@ prediction-set cardinality is integer-valued.
 The comparison additionally writes `coverage_matched.pdf/png` and
 `compare_ecp_coverage_matched.csv`. Configure
 `experiment.match_ecp_C_ranges.<dataset>: [C_min, C_max]` to select the eCP
-budget region. Every mean eCP point in that region is matched to the closest
-mean TsCP operating point and retained only when the absolute empirical-
-coverage gap is at most `experiment.match_coverage_tolerance` (a scalar or a
-dataset-keyed mapping). The CSV reports both coverages and their actual gap.
-No interpolation or extrapolation is used. To match only one evaluated eCP
-budget, set a degenerate interval such as `[15.0, 15.0]`.
+budget region. At each selected eCP budget, the mean coverage over its raw batch
+points is the matching target. The displayed eCP points at that budget and all
+TsCP batch points are retained only when their absolute coverage distance from
+that target is at most `experiment.match_coverage_tolerance` (a scalar or a
+dataset-keyed mapping). The plot shows these raw points plus square/diamond mean
+markers, matching the external 2x3 plotting protocol. No interpolation or
+extrapolation is used. To match only one evaluated eCP budget, set a degenerate
+interval such as `[15.0, 15.0]`. Raw selected points and summary means are saved
+to `compare_ecp_coverage_matched_points.csv` and
+`compare_ecp_coverage_matched.csv`, respectively.
 
 Run the revised LOO estimator comparison with:
 
