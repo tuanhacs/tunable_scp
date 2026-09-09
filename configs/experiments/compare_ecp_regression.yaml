@@ -4,7 +4,7 @@ experiment:
   name: compare_ecp_regression
   type: compare_ecp
   trials: 5000
-  batch_size: 1000
+  batch_size: 2000
   batches: 200
   budget_steps: 2
   budget_ranges:
