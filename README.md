@@ -155,6 +155,16 @@ points are useful as a paired visualization and are not independent experiment
 replicates. Classification budgets are ceiled and deduplicated because
 prediction-set cardinality is integer-valued.
 
+The comparison additionally writes `coverage_matched.pdf/png` and
+`compare_ecp_coverage_matched.csv`. Configure
+`experiment.match_ecp_C_ranges.<dataset>: [C_min, C_max]` to select the eCP
+budget region. Every mean eCP point in that region is matched to the closest
+mean TsCP operating point and retained only when the absolute empirical-
+coverage gap is at most `experiment.match_coverage_tolerance` (a scalar or a
+dataset-keyed mapping). The CSV reports both coverages and their actual gap.
+No interpolation or extrapolation is used. To match only one evaluated eCP
+budget, set a degenerate interval such as `[15.0, 15.0]`.
+
 Run the revised LOO estimator comparison with:
 
 ```bash

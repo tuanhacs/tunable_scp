@@ -36,13 +36,15 @@ def main() -> Path:
         config.setdefault("budget", {})["value"] = 10.0 if task == "regression" else 4
         config["budget"].pop("value_by_dataset", None)
         if config.get("experiment", {}).get("type") == "compare_ecp":
-            config["experiment"]["trials"] = 10
-            config["experiment"]["batch_size"] = 5
+            config["experiment"]["trials"] = 20
+            config["experiment"]["batch_size"] = 10
             config["experiment"]["batches"] = 3
-            config["experiment"]["budget_steps"] = 2
+            config["experiment"]["budget_steps"] = 3
             config["experiment"]["budget_ranges"] = {
-                synthetic: ([6, 10] if task == "regression" else [3, 4])
+                synthetic: ([4, 20] if task == "regression" else [2, 10])
             }
+            config["experiment"]["match_ecp_C_ranges"] = config["experiment"]["budget_ranges"].copy()
+            config["experiment"]["match_coverage_tolerance"] = 1.0
             config["experiment"].pop("budget_values", None)
         if config.get("experiment", {}).get("type") == "model_ablation":
             config["experiment"]["models"] = ["ridge"] if task == "regression" else ["logistic"]

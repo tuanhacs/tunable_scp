@@ -5,16 +5,22 @@ experiment:
   type: compare_ecp
   trials: 2000
   batch_size: 1000
-  batches: 50
+  batches: 100
   # Classification cardinality budgets are integer-valued. Values generated
   # inside the ranges are ceiled and deduplicated by the collector.
-  budget_steps: 31
+  budget_steps: 7
   budget_ranges:
     synthetic_classification: [14, 18]
     mnist: [2, 5]
     covertype: [2, 5]
+  # Edit these intervals to select which eCP budgets are coverage-matched.
+  match_ecp_C_ranges:
+    synthetic_classification: [14, 18]
+    mnist: [2, 5]
+    covertype: [2, 5]
+  match_coverage_tolerance: 0.005
   variants:
-    - {name: "TsCP", method: tscp, delta: 1.1, score: one_minus_probability}
-    - {name: "eCP", method: ecp, score: negative_log_probability}
+    - { name: "TsCP", method: tscp, delta: 1.1, score: one_minus_probability }
+    - { name: "eCP", method: ecp, score: negative_log_probability }
 seeds: [0]
 datasets: [synthetic_classification, mnist, covertype]

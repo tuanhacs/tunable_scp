@@ -10,11 +10,12 @@ from tscp.experiments import (
     loo_compare_report_table,
     loo_coverage_report_table,
     make_figures,
+    summarize_coverage_matched_compare,
     summarize_loo_compare,
 )
 
 
-def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool():
+def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool(tmp_path):
     root = Path(__file__).resolve().parents[2]
     config = load_config(root / "configs" / "experiments" / "compare_ecp_regression.yaml")
     config["datasets"] = ["synthetic_regression"]
@@ -25,6 +26,8 @@ def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool():
     config["experiment"]["batches"] = 3
     config["experiment"]["budget_steps"] = 2
     config["experiment"]["budget_ranges"] = {"synthetic_regression": [6.0, 10.0]}
+    config["experiment"]["match_ecp_C_ranges"] = {"synthetic_regression": [6.0, 10.0]}
+    config["experiment"]["match_coverage_tolerance"] = 1.0
     config["data"].update({"max_samples": 800, "total_calibration_size": 60})
 
     frame = collect_compare(config)
@@ -35,6 +38,16 @@ def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool():
     assert set(frame["batch"]) == {0, 1, 2}
     assert frame.groupby(["seed", "budget", "variant", "batch"]).size().eq(1).all()
     assert frame["coverage"].between(0.0, 1.0).all()
+    matched = summarize_coverage_matched_compare(frame, config)
+    assert len(matched) == 2
+    assert (matched["selection"] == "nearest_within_tolerance").all()
+    assert (matched["coverage_gap"] <= matched["coverage_tolerance"]).all()
+    make_figures(frame, config, tmp_path)
+    for name in (
+        "figure.pdf", "figure.png", "coverage_matched.pdf", "coverage_matched.png",
+        "compare_ecp_points.csv", "compare_ecp_coverage_matched.csv",
+    ):
+        assert (tmp_path / name).is_file()
 
 
 def test_self_validation_collector_on_small_synthetic_data(tmp_path):

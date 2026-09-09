@@ -1015,6 +1015,93 @@ def loo_coverage_report_table(summary: pd.DataFrame) -> pd.DataFrame:
     return table[columns].sort_values(["dataset", "total_calibration_size"]).reset_index(drop=True)
 
 
+def summarize_coverage_matched_compare(frame: pd.DataFrame, config: dict) -> pd.DataFrame:
+    """Match TsCP operating points to a selected eCP budget region.
+
+    Each mean eCP operating point in ``match_ecp_C_ranges`` is paired with the
+    closest mean TsCP point whenever their empirical coverages differ by at
+    most ``match_coverage_tolerance``. No interpolation or extrapolation is
+    performed.
+    """
+    experiment = config.get("experiment", {})
+    configured_ranges = experiment.get("match_ecp_C_ranges", {})
+    tolerance_config = experiment.get("match_coverage_tolerance", 0.005)
+    curve = frame.groupby(
+        ["dataset", "variant", "method", "budget"], as_index=False,
+    ).agg(coverage=("coverage", "mean"), average_size=("average_size", "mean"))
+    rows = []
+
+    for dataset in config["datasets"]:
+        dataset_curve = curve[curve.dataset == dataset]
+        ecp_variants = dataset_curve.loc[dataset_curve.method == "ecp", "variant"].unique()
+        tscp_variants = dataset_curve.loc[dataset_curve.method == "tscp", "variant"].unique()
+        if len(ecp_variants) != 1 or len(tscp_variants) != 1:
+            raise ValueError(
+                "Coverage matching requires exactly one eCP and one TsCP variant per dataset."
+            )
+        ecp_name, tscp_name = str(ecp_variants[0]), str(tscp_variants[0])
+        ecp = dataset_curve[dataset_curve.variant == ecp_name].sort_values("budget")
+        tscp = dataset_curve[dataset_curve.variant == tscp_name].sort_values("budget")
+
+        if dataset not in configured_ranges:
+            raise ValueError(f"Missing match_ecp_C_ranges.{dataset} for coverage matching.")
+        bounds = configured_ranges[dataset]
+        if not isinstance(bounds, (list, tuple)) or len(bounds) != 2:
+            raise ValueError(f"match_ecp_C_ranges.{dataset} must contain [C_min, C_max].")
+        c_min, c_max = map(float, bounds)
+        if not np.isfinite(c_min) or not np.isfinite(c_max) or c_min > c_max:
+            raise ValueError(f"Invalid eCP budget interval for {dataset}: {bounds}.")
+        tolerance = float(
+            tolerance_config.get(dataset, tolerance_config.get("default", 0.005))
+            if isinstance(tolerance_config, dict) else tolerance_config
+        )
+        if not np.isfinite(tolerance) or tolerance < 0:
+            raise ValueError("match_coverage_tolerance must be finite and non-negative.")
+        references = ecp[ecp.budget.between(c_min, c_max)]
+        if references.empty:
+            raise ValueError(
+                f"No evaluated eCP budget for {dataset} lies in [{c_min}, {c_max}]."
+            )
+
+        minimum_gap = np.inf
+        matched_count = 0
+        for _, reference in references.iterrows():
+            target_coverage = float(reference.coverage)
+            gaps = (tscp.coverage - target_coverage).abs()
+            candidate_index = gaps.idxmin()
+            candidate = tscp.loc[candidate_index]
+            coverage_gap = float(gaps.loc[candidate_index])
+            minimum_gap = min(minimum_gap, coverage_gap)
+            if coverage_gap > tolerance:
+                continue
+            ecp_size = float(reference.average_size)
+            tscp_size = float(candidate.average_size)
+            reduction = ecp_size - tscp_size
+            rows.append({
+                "dataset": dataset,
+                "selection": "nearest_within_tolerance",
+                "target_coverage": target_coverage,
+                "tscp_matched_coverage": float(candidate.coverage),
+                "coverage_gap": coverage_gap,
+                "coverage_tolerance": tolerance,
+                "ecp_variant": ecp_name,
+                "ecp_budget": float(reference.budget),
+                "ecp_average_size": ecp_size,
+                "tscp_variant": tscp_name,
+                "tscp_matched_budget": float(candidate.budget),
+                "tscp_matched_size": tscp_size,
+                "size_reduction": reduction,
+                "size_reduction_percent": 100.0 * reduction / ecp_size if ecp_size else np.nan,
+            })
+            matched_count += 1
+        if matched_count == 0:
+            raise ValueError(
+                f"No TsCP point matches the selected eCP C range for {dataset} within "
+                f"tolerance={tolerance:g}; the smallest observed gap is {minimum_gap:g}."
+            )
+    return pd.DataFrame(rows)
+
+
 def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
     kind = config["experiment"]["type"]
     datasets = config["datasets"]
@@ -1240,6 +1327,68 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             if col == 0:
                 ax.set_ylabel("Average Size")
                 ax.legend(loc="best")
+
+        matched = summarize_coverage_matched_compare(frame, config)
+        matched.to_csv(output / "compare_ecp_coverage_matched.csv", index=False)
+        matched_fig, matched_axes = plt.subplots(
+            1, len(datasets),
+            figsize=_plot_figsize(config, (5.2 * len(datasets), 4.5)),
+            squeeze=False,
+        )
+        mean_curve = frame.groupby(
+            ["dataset", "variant", "method", "budget"], as_index=False,
+        ).agg(coverage=("coverage", "mean"), average_size=("average_size", "mean"))
+        for col, dataset in enumerate(datasets):
+            ax = matched_axes[0, col]
+            dataset_curve = mean_curve[mean_curve.dataset == dataset]
+            for method_name, color, marker in (
+                ("ecp", "tab:blue", "x"), ("tscp", "tab:orange", "o"),
+            ):
+                part = dataset_curve[dataset_curve.method == method_name].sort_values("coverage")
+                ax.plot(
+                    part.coverage, part.average_size, color=color, alpha=0.28,
+                    linewidth=1.0, marker=".", label="_nolegend_",
+                )
+            points = matched[matched.dataset == dataset]
+            for _, point in points.iterrows():
+                ax.plot(
+                    [float(point.target_coverage), float(point.tscp_matched_coverage)],
+                    [float(point.ecp_average_size), float(point.tscp_matched_size)],
+                    color="0.35", linestyle="--", linewidth=1.0, alpha=0.7, zorder=3,
+                )
+            ax.scatter(
+                points.target_coverage, points.ecp_average_size,
+                marker="x", color="tab:blue", s=80,
+                linewidths=2.0, zorder=4, label="eCP" if col == 0 else "_nolegend_",
+            )
+            ax.scatter(
+                points.tscp_matched_coverage, points.tscp_matched_size,
+                marker="o", color="tab:orange", s=65,
+                zorder=4, label="TsCP (coverage matched)" if col == 0 else "_nolegend_",
+            )
+            if len(points) == 1:
+                point = points.iloc[0]
+                reduction_percent = float(point.size_reduction_percent)
+                reduction_label = (
+                    rf"{reduction_percent:.1f}\% smaller"
+                    if reduction_percent >= 0
+                    else rf"{abs(reduction_percent):.1f}\% larger"
+                )
+                ax.annotate(
+                    reduction_label,
+                    (
+                        0.5 * (float(point.target_coverage) + float(point.tscp_matched_coverage)),
+                        0.5 * (float(point.ecp_average_size) + float(point.tscp_matched_size)),
+                    ),
+                    xytext=(7, 0), textcoords="offset points", va="center",
+                )
+            ax.set_title(_dataset_display_name(dataset))
+            ax.set_xlabel("Empirical Coverage")
+            ax.grid(alpha=0.25)
+            if col == 0:
+                ax.set_ylabel("Average Size")
+                ax.legend(loc="best")
+        _save_figure(matched_fig, output, "coverage_matched", config)
     elif kind == "budget_ablation":
         fig, axes = plt.subplots(
             1, len(datasets), figsize=_plot_figsize(config, (6 * len(datasets), 4.5)), squeeze=False,
