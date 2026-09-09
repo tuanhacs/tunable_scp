@@ -6,7 +6,6 @@ experiment:
   models: [logistic, gradient_boosting, random_forest, dnn]
 datasets: [mnist]
 method:
-  delta: 1.1
+  delta: 1.0
 budget:
   value: 4
-
