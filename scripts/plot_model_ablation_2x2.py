@@ -80,11 +80,24 @@ def main() -> Path:
         "--coverage-ylim", nargs=2, type=float, metavar=("MIN", "MAX"),
         help="Shared y-axis limits for the two coverage panels.",
     )
+    parser.add_argument(
+        "--regression-coverage-ylim", nargs=2, type=float, metavar=("MIN", "MAX"),
+        help="Y-axis limits for the regression coverage panel only.",
+    )
+    parser.add_argument(
+        "--classification-coverage-ylim", nargs=2, type=float, metavar=("MIN", "MAX"),
+        help="Y-axis limits for the classification coverage panel only.",
+    )
     parser.add_argument("--font-size", type=float, default=11.0)
     parser.add_argument("--dpi", type=int, default=180)
     args = parser.parse_args()
-    if args.coverage_ylim is not None and args.coverage_ylim[0] >= args.coverage_ylim[1]:
-        parser.error("--coverage-ylim requires MIN < MAX")
+    for option, limits in (
+        ("--coverage-ylim", args.coverage_ylim),
+        ("--regression-coverage-ylim", args.regression_coverage_ylim),
+        ("--classification-coverage-ylim", args.classification_coverage_ylim),
+    ):
+        if limits is not None and limits[0] >= limits[1]:
+            parser.error(f"{option} requires MIN < MAX")
 
     frame = pd.concat([_load_run(value) for value in args.inputs], ignore_index=True)
     duplicate_keys = ["task", "dataset", "model", "seed", "panel", "x"]
@@ -166,8 +179,14 @@ def main() -> Path:
             ax.grid(alpha=0.25)
             ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
             ax.yaxis.set_major_locator(MaxNLocator(nbins=4))
-        if args.coverage_ylim is not None:
-            axes[0, col].set_ylim(*args.coverage_ylim)
+        task_limits = (
+            args.regression_coverage_ylim
+            if task == "regression"
+            else args.classification_coverage_ylim
+        )
+        coverage_limits = task_limits or args.coverage_ylim
+        if coverage_limits is not None:
+            axes[0, col].set_ylim(*coverage_limits)
 
     model_handles = [
         Line2D([], [], color=color_by_model[model], marker="o", label=MODEL_LABELS.get(model, model))
