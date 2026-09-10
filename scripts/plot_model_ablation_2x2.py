@@ -76,9 +76,15 @@ def main() -> Path:
     parser.add_argument("--regression-dataset")
     parser.add_argument("--classification-dataset")
     parser.add_argument("--figsize", nargs=2, type=float, default=(12.0, 8.0))
+    parser.add_argument(
+        "--coverage-ylim", nargs=2, type=float, metavar=("MIN", "MAX"),
+        help="Shared y-axis limits for the two coverage panels.",
+    )
     parser.add_argument("--font-size", type=float, default=11.0)
     parser.add_argument("--dpi", type=int, default=180)
     args = parser.parse_args()
+    if args.coverage_ylim is not None and args.coverage_ylim[0] >= args.coverage_ylim[1]:
+        parser.error("--coverage-ylim requires MIN < MAX")
 
     frame = pd.concat([_load_run(value) for value in args.inputs], ignore_index=True)
     duplicate_keys = ["task", "dataset", "model", "seed", "panel", "x"]
@@ -160,6 +166,8 @@ def main() -> Path:
             ax.grid(alpha=0.25)
             ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
             ax.yaxis.set_major_locator(MaxNLocator(nbins=4))
+        if args.coverage_ylim is not None:
+            axes[0, col].set_ylim(*args.coverage_ylim)
 
     model_handles = [
         Line2D([], [], color=color_by_model[model], marker="o", label=MODEL_LABELS.get(model, model))
