@@ -42,7 +42,7 @@ def _load_run(value: str) -> pd.DataFrame:
         raise ValueError(f"Not a model_ablation run: {metrics}")
     frame = pd.read_csv(metrics)
     required = {
-        "dataset", "model", "seed", "calibration_size", "coverage",
+        "panel", "x", "dataset", "model", "seed", "coverage",
         "corrected_bound", "average_size", "budget",
     }
     missing = required - set(frame.columns)
@@ -81,7 +81,7 @@ def main() -> Path:
     args = parser.parse_args()
 
     frame = pd.concat([_load_run(value) for value in args.inputs], ignore_index=True)
-    duplicate_keys = ["task", "dataset", "model", "seed", "calibration_size"]
+    duplicate_keys = ["task", "dataset", "model", "seed", "panel", "x"]
     duplicates = frame.duplicated(duplicate_keys, keep=False)
     if duplicates.any():
         collided = frame.loc[duplicates, duplicate_keys + ["source"]]
@@ -100,15 +100,21 @@ def main() -> Path:
     output.mkdir(parents=True, exist_ok=True)
     selected.to_csv(output / "model_ablation_2x2_input_points.csv", index=False)
 
-    summary = selected.groupby(
-        ["task", "dataset", "model", "calibration_size"], as_index=False,
+    coverage_summary = selected[selected.panel == "coverage"].groupby(
+        ["task", "dataset", "model", "panel", "x"], as_index=False,
     ).agg(
         empirical_coverage=("coverage", "mean"),
         theoretical_coverage=("corrected_bound", "mean"),
+        outer_seeds=("seed", "nunique"),
+    )
+    size_summary = selected[selected.panel == "size"].groupby(
+        ["task", "dataset", "model", "panel", "x"], as_index=False,
+    ).agg(
         average_size=("average_size", "mean"),
         prechosen_size=("budget", "mean"),
         outer_seeds=("seed", "nunique"),
     )
+    summary = pd.concat([coverage_summary, size_summary], ignore_index=True, sort=False)
 
     preferred = ["ridge", "logistic", "gradient_boosting", "dnn", "mlp", "random_forest", "extra_trees"]
     models = list(dict.fromkeys(preferred + sorted(summary.model.astype(str).unique())))
@@ -121,27 +127,31 @@ def main() -> Path:
     columns = [("regression", regression_dataset), ("classification", classification_dataset)]
     for col, (task, dataset) in enumerate(columns):
         part = summary[(summary.task == task) & (summary.dataset == dataset)]
-        for model, model_part in part.groupby("model"):
-            model_part = model_part.sort_values("calibration_size")
+        coverage_part = part[part.panel == "coverage"]
+        size_part = part[part.panel == "size"]
+        for model, model_part in coverage_part.groupby("model"):
+            model_part = model_part.sort_values("x")
             color = color_by_model[str(model)]
             axes[0, col].plot(
-                model_part.calibration_size, model_part.empirical_coverage,
+                model_part.x, model_part.empirical_coverage,
                 color=color, marker="o", label=MODEL_LABELS.get(str(model), str(model)),
             )
             axes[0, col].plot(
-                model_part.calibration_size, model_part.theoretical_coverage,
+                model_part.x, model_part.theoretical_coverage,
                 color=color, linestyle="--", label="_nolegend_",
             )
+            model_size = size_part[size_part.model == model].sort_values("x")
             axes[1, col].plot(
-                model_part.calibration_size, model_part.average_size,
+                model_size.x, model_size.average_size,
                 color=color, marker="o", label=MODEL_LABELS.get(str(model), str(model)),
             )
-        budget_curve = part.groupby("calibration_size", as_index=False).prechosen_size.mean()
+        budget_curve = size_part.groupby("x", as_index=False).prechosen_size.mean()
         axes[1, col].plot(
-            budget_curve.calibration_size, budget_curve.prechosen_size,
+            budget_curve.x, budget_curve.prechosen_size,
             color="black", linestyle="--", label="Pre-chosen set size",
         )
         axes[0, col].set_title(_dataset_display_name(dataset).replace("CaliforniaHousing", "California Housing"))
+        axes[0, col].set_xlabel("Number of test samples")
         axes[1, col].set_xlabel(r"Total calibration size $2n$")
         if col == 0:
             axes[0, col].set_ylabel("Coverage")

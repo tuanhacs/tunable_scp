@@ -96,20 +96,28 @@ def test_model_ablation_uses_independent_mc_theory_without_loo():
     config["datasets"] = ["synthetic_regression"]
     config["seeds"] = [0]
     config["experiment"]["models"] = ["ridge"]
-    config["experiment"]["empirical_trials"] = 3
+    config["experiment"]["size_trials"] = 3
     config["experiment"]["reference_trials"] = 4
-    config["data"].update({"max_samples": 800, "total_calibration_sizes": [60]})
+    config["data"].update({
+        "max_samples": 800,
+        "total_calibration_size": 60,
+        "total_calibration_sizes": [60],
+        "number_test_samples": [2, 3],
+    })
     config["budget"] = {"type": "constant", "value": 10.0}
 
     frame = collect_model_ablation(config)
 
-    assert len(frame) == 1
-    row = frame.iloc[0]
-    assert row.empirical_trials == 3
-    assert row.reference_trials == 4
-    np.testing.assert_allclose(row.corrected_bound, row.reference_coverage)
+    assert len(frame) == 3
+    coverage = frame[frame.panel == "coverage"]
+    size = frame[frame.panel == "size"]
+    assert set(coverage.x) == {2, 3}
+    assert set(coverage.empirical_trials) == {2, 3}
+    assert set(coverage.reference_trials) == {4}
+    assert set(size.size_trials) == {3}
+    np.testing.assert_allclose(coverage.corrected_bound, coverage.reference_coverage)
     np.testing.assert_allclose(
-        row.corrected_bound, 1.0 - row.expected_alpha - row.expected_delta,
+        coverage.corrected_bound, 1.0 - coverage.expected_alpha - coverage.expected_delta,
     )
 
 

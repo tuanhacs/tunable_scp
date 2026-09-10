@@ -3,7 +3,7 @@ task: regression
 experiment:
   name: model_ablation_regression
   type: model_ablation
-  empirical_trials: 1000
+  size_trials: 1000
   reference_trials: 1000
   models: [ridge, gradient_boosting, random_forest, dnn]
 datasets: [california_housing]

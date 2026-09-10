@@ -134,11 +134,13 @@ python scripts/run_suite.py --suite configs/suites/main_paper.yaml --smoke
 | `loo_compare_ecp_*.yaml` | LOO-estimator variance tables and estimated-vs-empirical coverage-gap figures |
 
 Model ablations use no LOO coverage estimate. Each model is fitted once per
-outer seed. For every calibration size, `experiment.empirical_trials`
-independent trials redraw the complete calibration pair `(D1, D2)` and one test
-observation to estimate empirical coverage and mean set size. A disjoint
-`experiment.reference_trials` stream estimates `E[alpha]` and `E[delta]`, and
-the dashed theoretical curve is `1 - E[alpha] - E[delta]`.
+outer seed. The coverage panel fixes `data.total_calibration_size` and uses
+nested prefixes of random `(D1, D2, X0, Y0)` trials at the values in
+`data.number_test_samples`. A disjoint `experiment.reference_trials` stream
+estimates `E[alpha]` and `E[delta]`, so the dashed theoretical curve
+`1 - E[alpha] - E[delta]` is horizontal in the number of test samples. The size
+panel varies `data.total_calibration_sizes` and averages
+`experiment.size_trials` fresh random calibration/test pairs at every size.
 
 Each model can be tuned and run separately by setting
 `experiment.models=[model_name]` and overriding entries under

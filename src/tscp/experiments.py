@@ -479,19 +479,23 @@ def collect_budget_ablation(config: dict) -> pd.DataFrame:
 def collect_model_ablation(config: dict) -> pd.DataFrame:
     """Compare models using independent empirical and theoretical MC streams.
 
-    A model is fitted once per dataset/model/outer seed. For every calibration
-    size, each Monte Carlo trial redraws C=(D1,D2) and one test observation.
-    The empirical stream estimates marginal coverage directly; the independent
-    reference stream estimates E[alpha] and E[delta]. No LOO estimate is used.
+    A model is fitted once per dataset/model/outer seed. The coverage panel fixes
+    calibration size and varies the number of Monte Carlo test trials; its
+    independent reference expectation is therefore horizontal. The size panel
+    varies calibration size using a fixed number of random C/test trials.
     """
     rows = []
     experiment = config.get("experiment", {})
     data_cfg = config.get("data", {})
     method_cfg = config.get("method", {})
-    empirical_trials = int(experiment.get("empirical_trials", data_cfg.get("fixed_number_test_samples", 1500)))
+    test_sizes = [int(value) for value in data_cfg.get("number_test_samples", [])]
+    if not test_sizes:
+        raise ValueError("model_ablation requires data.number_test_samples.")
+    fixed_calibration_size = int(data_cfg.get("total_calibration_size", 2000))
+    size_trials = int(experiment.get("size_trials", data_cfg.get("fixed_number_test_samples", 1500)))
     reference_trials = int(experiment.get("reference_trials", 500))
-    if empirical_trials < 1 or reference_trials < 1:
-        raise ValueError("model_ablation empirical_trials and reference_trials must be positive.")
+    if min(test_sizes) < 1 or size_trials < 1 or reference_trials < 1:
+        raise ValueError("model_ablation test counts, size_trials and reference_trials must be positive.")
     grid = alpha_grid(config)
     delta = float(method_cfg.get("delta", 0.1))
     score_type = str(method_cfg.get("score", "one_minus_probability"))
@@ -534,57 +538,80 @@ def collect_model_ablation(config: dict) -> pd.DataFrame:
                         tie_break_epsilon, estimate_coverage=False,
                     )
 
-                for size in config["data"]["total_calibration_sizes"]:
-                    size = int(size)
-                    empirical_covered = []
-                    empirical_sizes = []
-                    empirical_budgets = []
-                    for trial in range(empirical_trials):
-                        run_seed = 4_000_000_000 + int(seed) * 10_000_000 + size * 1_000 + trial
-                        result = run_one_random_pair(size, run_seed)
-                        empirical_covered.append(float(result.covered[0]))
-                        empirical_sizes.append(float(result.sizes[0]))
-                        empirical_budgets.append(float(result.budgets[0]))
+                # Coverage panel: nested prefixes of random (C, X0, Y0) trials.
+                empirical_covered = []
+                for trial in range(max(test_sizes)):
+                    run_seed = (
+                        4_000_000_000 + int(seed) * 10_000_000
+                        + fixed_calibration_size * 1_000 + trial
+                    )
+                    result = run_one_random_pair(fixed_calibration_size, run_seed)
+                    empirical_covered.append(float(result.covered[0]))
+                empirical_covered = np.asarray(empirical_covered, dtype=float)
 
-                    reference_alphas = []
-                    reference_deltas = []
-                    reference_covered = []
-                    for trial in range(reference_trials):
-                        run_seed = 5_000_000_000 + int(seed) * 10_000_000 + size * 1_000 + trial
-                        result = run_one_random_pair(size, run_seed)
-                        alpha_value = float(result.alphas[0])
-                        covered_value = float(result.covered[0])
-                        reference_alphas.append(alpha_value)
-                        reference_deltas.append((1.0 - covered_value) - alpha_value)
-                        reference_covered.append(covered_value)
+                reference_alphas = []
+                reference_deltas = []
+                reference_covered = []
+                for trial in range(reference_trials):
+                    run_seed = (
+                        5_000_000_000 + int(seed) * 10_000_000
+                        + fixed_calibration_size * 1_000 + trial
+                    )
+                    result = run_one_random_pair(fixed_calibration_size, run_seed)
+                    alpha_value = float(result.alphas[0])
+                    covered_value = float(result.covered[0])
+                    reference_alphas.append(alpha_value)
+                    reference_deltas.append((1.0 - covered_value) - alpha_value)
+                    reference_covered.append(covered_value)
+                expected_alpha = float(np.mean(reference_alphas))
+                expected_delta = float(np.mean(reference_deltas))
+                corrected_theory = 1.0 - expected_alpha - expected_delta
 
-                    expected_alpha = float(np.mean(reference_alphas))
-                    expected_delta = float(np.mean(reference_deltas))
-                    empirical_covered_array = np.asarray(empirical_covered, dtype=float)
-                    empirical_sizes_array = np.asarray(empirical_sizes, dtype=float)
-                    corrected_theory = 1.0 - expected_alpha - expected_delta
+                for count in test_sizes:
+                    prefix = empirical_covered[:count]
                     rows.append({
-                        "dataset": dataset,
-                        "model": model,
-                        "seed": int(seed),
-                        "calibration_size": size,
-                        "coverage": float(empirical_covered_array.mean()),
+                        "panel": "coverage", "dataset": dataset, "model": model,
+                        "seed": int(seed), "x": count,
+                        "number_test_samples": count,
+                        "calibration_size": fixed_calibration_size,
+                        "coverage": float(prefix.mean()),
                         "coverage_standard_error": float(
-                            empirical_covered_array.std(ddof=1) / np.sqrt(empirical_trials)
-                        ) if empirical_trials > 1 else 0.0,
-                        "average_size": float(empirical_sizes_array.mean()),
-                        "average_size_std": float(empirical_sizes_array.std(ddof=1)) if empirical_trials > 1 else 0.0,
-                        "budget": float(np.mean(empirical_budgets)),
-                        "hard_accuracy": float(
-                            np.mean(empirical_sizes_array <= np.asarray(empirical_budgets, dtype=float))
-                        ),
+                            prefix.std(ddof=1) / np.sqrt(count)
+                        ) if count > 1 else 0.0,
+                        "corrected_bound": corrected_theory,
                         "expected_alpha": expected_alpha,
                         "expected_delta": expected_delta,
                         "old_proxy": 1.0 - expected_alpha,
-                        "corrected_bound": corrected_theory,
                         "reference_coverage": float(np.mean(reference_covered)),
-                        "empirical_trials": empirical_trials,
                         "reference_trials": reference_trials,
+                        "empirical_trials": count,
+                    })
+
+                # Size panel: calibration size varies; each point averages the
+                # same configured number of fresh random (C, X0, Y0) trials.
+                for size in data_cfg["total_calibration_sizes"]:
+                    size = int(size)
+                    sizes = []
+                    budgets = []
+                    covered = []
+                    for trial in range(size_trials):
+                        run_seed = 6_000_000_000 + int(seed) * 10_000_000 + size * 1_000 + trial
+                        result = run_one_random_pair(size, run_seed)
+                        sizes.append(float(result.sizes[0]))
+                        budgets.append(float(result.budgets[0]))
+                        covered.append(float(result.covered[0]))
+                    sizes = np.asarray(sizes, dtype=float)
+                    budgets = np.asarray(budgets, dtype=float)
+                    rows.append({
+                        "panel": "size", "dataset": dataset, "model": model,
+                        "seed": int(seed), "x": size,
+                        "calibration_size": size,
+                        "average_size": float(sizes.mean()),
+                        "average_size_std": float(sizes.std(ddof=1)) if size_trials > 1 else 0.0,
+                        "budget": float(budgets.mean()),
+                        "hard_accuracy": float(np.mean(sizes <= budgets)),
+                        "coverage": float(np.mean(covered)),
+                        "size_trials": size_trials,
                     })
     return pd.DataFrame(rows)
 
@@ -1514,22 +1541,37 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
         fig, axes = plt.subplots(
             2, len(datasets), figsize=_plot_figsize(config, (6 * len(datasets), 8)), squeeze=False,
         )
-        avg = _mean(frame, ["dataset", "model", "calibration_size"], ["coverage", "average_size", "corrected_bound"])
+        coverage_avg = _mean(
+            frame[frame.panel == "coverage"], ["dataset", "model", "x"],
+            ["coverage", "corrected_bound"],
+        )
+        size_avg = _mean(
+            frame[frame.panel == "size"], ["dataset", "model", "x"],
+            ["average_size", "budget"],
+        )
         for col, dataset in enumerate(datasets):
-            for model, part in avg[avg.dataset == dataset].groupby("model"):
-                part = part.sort_values("calibration_size")
+            dataset_coverage = coverage_avg[coverage_avg.dataset == dataset]
+            dataset_size = size_avg[size_avg.dataset == dataset]
+            for model, part in dataset_coverage.groupby("model"):
+                part = part.sort_values("x")
                 empirical_line, = axes[0, col].plot(
-                    part.calibration_size, part.coverage, marker="o", label=model,
+                    part.x, part.coverage, marker="o", label=model,
                 )
                 axes[0, col].plot(
-                    part.calibration_size, part.corrected_bound,
+                    part.x, part.corrected_bound,
                     color=empirical_line.get_color(), linestyle="--", label="_nolegend_",
                 )
+                size_part = dataset_size[dataset_size.model == model].sort_values("x")
                 axes[1, col].plot(
-                    part.calibration_size, part.average_size, marker="o",
+                    size_part.x, size_part.average_size, marker="o",
                     color=empirical_line.get_color(), label=model,
                 )
-            axes[0, col].set(title=_dataset_display_name(dataset), xlabel=r"Total calibration size $2n$", ylabel="Coverage")
+            budget_curve = dataset_size.groupby("x", as_index=False).budget.mean()
+            axes[1, col].plot(
+                budget_curve.x, budget_curve.budget, color="black", linestyle=":",
+                label="Pre-chosen set size",
+            )
+            axes[0, col].set(title=_dataset_display_name(dataset), xlabel="Number of test samples", ylabel="Coverage")
             axes[1, col].set(xlabel=r"Total calibration size $2n$", ylabel="Average prediction-set size")
             axes[0, col]._tscp_plot_scope = "coverage"
             axes[1, col]._tscp_plot_scope = "size"
