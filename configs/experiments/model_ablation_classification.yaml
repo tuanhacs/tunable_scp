@@ -7,6 +7,12 @@ experiment:
   reference_trials: 500
   models: [logistic, gradient_boosting, random_forest, dnn]
 datasets: [mnist]
+model:
+  parameters:
+    logistic: {C: 1.0, max_iter: 500}
+    gradient_boosting: {learning_rate: 0.1, max_iter: 100}
+    random_forest: {n_estimators: 200, min_samples_leaf: 2}
+    dnn: {hidden_layer_sizes: [256, 128], max_iter: 300}
 method:
   delta: 1.0
 budget:

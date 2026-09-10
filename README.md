@@ -140,6 +140,14 @@ observation to estimate empirical coverage and mean set size. A disjoint
 `experiment.reference_trials` stream estimates `E[alpha]` and `E[delta]`, and
 the dashed theoretical curve is `1 - E[alpha] - E[delta]`.
 
+Each model can be tuned and run separately by setting
+`experiment.models=[model_name]` and overriding entries under
+`model.parameters.<model_name>`. Combine the selected run directories into the
+paper's regression/classification 2x2 panel with
+`scripts/plot_model_ablation_2x2.py --inputs <run-dir> ...`. The combiner reads
+both `metrics.csv` and the adjacent `config.resolved.yaml`, rejects duplicate
+model/seed/calibration results, and saves the merged points with the figure.
+
 Delta ablations support dataset-specific linspace grids via
 `experiment.delta_ranges.<dataset>: [start, stop]` and
 `experiment.delta_steps`. Both endpoints are included. An explicit legacy

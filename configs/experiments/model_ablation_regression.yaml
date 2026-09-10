@@ -7,5 +7,11 @@ experiment:
   reference_trials: 1000
   models: [ridge, gradient_boosting, random_forest, dnn]
 datasets: [california_housing]
+model:
+  parameters:
+    ridge: {alpha: 1.0}
+    gradient_boosting: {n_estimators: 100, learning_rate: 0.1, max_depth: 3}
+    random_forest: {n_estimators: 200, min_samples_leaf: 3}
+    dnn: {hidden_layer_sizes: [256, 128], max_iter: 300}
 budget:
   value: 2.0

@@ -12,31 +12,50 @@ from sklearn.preprocessing import StandardScaler
 from .data import DataSplit
 
 
-def _regressor(name: str, seed: int):
+def _regressor(name: str, seed: int, parameters: dict | None = None):
     key = name.lower()
+    parameters = dict(parameters or {})
     if key == "ridge":
-        return make_pipeline(StandardScaler(), Ridge(alpha=1.0))
+        return make_pipeline(StandardScaler(), Ridge(**({"alpha": 1.0} | parameters)))
     if key == "random_forest":
-        return RandomForestRegressor(n_estimators=200, min_samples_leaf=3, n_jobs=-1, random_state=seed)
+        return RandomForestRegressor(**({
+            "n_estimators": 200, "min_samples_leaf": 3,
+            "n_jobs": -1, "random_state": seed,
+        } | parameters))
     if key == "gradient_boosting":
-        return GradientBoostingRegressor(random_state=seed)
+        return GradientBoostingRegressor(**({"random_state": seed} | parameters))
     if key == "extra_trees":
-        return ExtraTreesRegressor(n_estimators=200, min_samples_leaf=3, n_jobs=-1, random_state=seed)
+        return ExtraTreesRegressor(**({
+            "n_estimators": 200, "min_samples_leaf": 3,
+            "n_jobs": -1, "random_state": seed,
+        } | parameters))
     if key in {"mlp", "dnn"}:
-        return make_pipeline(StandardScaler(), MLPRegressor(hidden_layer_sizes=(256, 128), max_iter=300, random_state=seed))
+        return make_pipeline(StandardScaler(), MLPRegressor(**({
+            "hidden_layer_sizes": (256, 128), "max_iter": 300,
+            "random_state": seed,
+        } | parameters)))
     raise ValueError(f"Unknown regression model {name!r}.")
 
 
-def _classifier(name: str, seed: int):
+def _classifier(name: str, seed: int, parameters: dict | None = None):
     key = name.lower()
+    parameters = dict(parameters or {})
     if key == "logistic":
-        return make_pipeline(StandardScaler(), LogisticRegression(max_iter=500, random_state=seed))
+        return make_pipeline(StandardScaler(), LogisticRegression(**({
+            "max_iter": 500, "random_state": seed,
+        } | parameters)))
     if key == "random_forest":
-        return RandomForestClassifier(n_estimators=200, min_samples_leaf=2, n_jobs=-1, random_state=seed)
+        return RandomForestClassifier(**({
+            "n_estimators": 200, "min_samples_leaf": 2,
+            "n_jobs": -1, "random_state": seed,
+        } | parameters))
     if key == "gradient_boosting":
-        return HistGradientBoostingClassifier(random_state=seed)
+        return HistGradientBoostingClassifier(**({"random_state": seed} | parameters))
     if key in {"mlp", "dnn"}:
-        return make_pipeline(StandardScaler(), MLPClassifier(hidden_layer_sizes=(256, 128), max_iter=300, random_state=seed))
+        return make_pipeline(StandardScaler(), MLPClassifier(**({
+            "hidden_layer_sizes": (256, 128), "max_iter": 300,
+            "random_state": seed,
+        } | parameters)))
     raise ValueError(f"Unknown classification model {name!r}.")
 
 
@@ -55,12 +74,15 @@ class ClassificationPredictions:
     probs_test: np.ndarray
 
 
-def fit_regression(split: DataSplit, mean_model: str, scale_model: str, seed: int) -> RegressionPredictions:
+def fit_regression(
+    split: DataSplit, mean_model: str, scale_model: str, seed: int,
+    mean_parameters: dict | None = None, scale_parameters: dict | None = None,
+) -> RegressionPredictions:
     x_mean, x_scale, y_mean, y_scale = train_test_split(split.x_train, split.y_train, test_size=0.5, random_state=seed)
-    mean = _regressor(mean_model, seed)
+    mean = _regressor(mean_model, seed, mean_parameters)
     mean.fit(x_mean, y_mean)
     residuals = np.abs(y_scale - mean.predict(x_scale))
-    scale = _regressor(scale_model, seed + 17)
+    scale = _regressor(scale_model, seed + 17, scale_parameters)
     scale.fit(x_scale, residuals)
     raw_reference = np.maximum(scale.predict(x_scale), 1e-8)
     floor = max(float(np.quantile(raw_reference, 0.05)), 1e-8)
@@ -74,7 +96,9 @@ def fit_regression(split: DataSplit, mean_model: str, scale_model: str, seed: in
     )
 
 
-def fit_classification(split: DataSplit, model: str, seed: int) -> ClassificationPredictions:
-    classifier = _classifier(model, seed)
+def fit_classification(
+    split: DataSplit, model: str, seed: int, parameters: dict | None = None,
+) -> ClassificationPredictions:
+    classifier = _classifier(model, seed, parameters)
     classifier.fit(split.x_train, split.y_train)
     return ClassificationPredictions(classifier.predict_proba(split.x_cal), classifier.predict_proba(split.x_test))

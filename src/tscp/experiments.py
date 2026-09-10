@@ -48,12 +48,17 @@ def prepare(config: dict, dataset: str, seed: int, model_override: str | None = 
     x, y, task = load_dataset(dataset, seed=seed, max_samples=maximum)
     split = split_dataset(x, y, task, seed)
     model = config.get("model", {})
+    parameters_by_model = model.get("parameters", {})
     if task == "regression":
         name = model_override or model.get("mean", "random_forest")
-        fitted = fit_regression(split, name, model.get("scale", name), seed)
+        fitted = fit_regression(
+            split, name, model.get("scale", name), seed,
+            mean_parameters=parameters_by_model.get(name, {}),
+            scale_parameters=model.get("scale_parameters", {}),
+        )
     else:
         name = model_override or model.get("classifier", "logistic")
-        fitted = fit_classification(split, name, seed)
+        fitted = fit_classification(split, name, seed, parameters_by_model.get(name, {}))
     return task, split, fitted
 
 
@@ -569,6 +574,7 @@ def collect_model_ablation(config: dict) -> pd.DataFrame:
                         ) if empirical_trials > 1 else 0.0,
                         "average_size": float(empirical_sizes_array.mean()),
                         "average_size_std": float(empirical_sizes_array.std(ddof=1)) if empirical_trials > 1 else 0.0,
+                        "budget": float(np.mean(empirical_budgets)),
                         "hard_accuracy": float(
                             np.mean(empirical_sizes_array <= np.asarray(empirical_budgets, dtype=float))
                         ),
