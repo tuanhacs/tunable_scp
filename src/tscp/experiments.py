@@ -1671,7 +1671,7 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             if col == 0:
                 ax.set_xlabel(r"Calibration size")
             if col == 0:
-                ax.set_ylabel(r"$|\widehat{\mathrm{Coverage}}-\mathrm{Coverage}_{emp}|$")
+                ax.set_ylabel(r"$|\mathrm{Coverage}_{LOO}-\mathrm{Coverage}_{emp}|$")
                 ax.legend()
     else:
         return
