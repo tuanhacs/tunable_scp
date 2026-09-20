@@ -1332,7 +1332,7 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             probability_mean = part.hard_accuracy.to_numpy(dtype=float)
             probability_std = part.hard_accuracy_std.to_numpy(dtype=float)
             mean_line, = ax.plot(
-                x_values, probability_mean, marker="o", label="Mean over seeds",
+                x_values, probability_mean, marker="o",
             )
             ax.fill_between(
                 x_values,
@@ -1340,15 +1340,11 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
                 np.clip(probability_mean + probability_std, 0.0, 1.0),
                 color=mean_line.get_color(), alpha=0.2,
             )
-            ax.plot(
-                x_values, np.ones_like(x_values), linestyle="--",
-                color=mean_line.get_color(), label="Target probability",
-            )
+            ax.set_ylim(top=1.0)
             ax.set_title(_dataset_display_name(dataset))
             ax.set_xlabel(r"Total calibration size $2n$")
             if col == 0:
                 ax.set_ylabel(r"$\Pr\{|C_\delta(X)| \leq S(X)\}$")
-                ax.legend(loc="best")
             ax.grid(alpha=0.25)
         _save_figure(size_fig, output, "size_control_probability", config)
 
@@ -1382,7 +1378,7 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             probability_mean = size_part.hard_accuracy.to_numpy(dtype=float)
             probability_std = size_part.hard_accuracy_std.to_numpy(dtype=float)
             mean_line, = size_ax.plot(
-                x_values, probability_mean, marker="o", label="Mean over seeds",
+                x_values, probability_mean, marker="o",
             )
             size_ax.fill_between(
                 x_values,
@@ -1390,14 +1386,9 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
                 np.clip(probability_mean + probability_std, 0.0, 1.0),
                 color=mean_line.get_color(), alpha=0.2,
             )
-            size_ax.plot(
-                x_values, np.ones_like(x_values),
-                linestyle="--", color=mean_line.get_color(),
-                label="Target probability",
-            )
+            size_ax.set_ylim(top=1.0)
             size_ax.set_xlabel(r"Total calibration size $(2 \times n)$")
             size_ax.set_ylabel(r"$\Pr\{|C_\delta(X)| \leq S(X)\}$")
-            size_ax.legend(loc="upper right")
             size_ax.grid(alpha=0.25)
 
             _save_figure(
