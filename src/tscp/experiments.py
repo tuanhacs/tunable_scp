@@ -215,10 +215,34 @@ def collect_self_validation(config: dict) -> pd.DataFrame:
                              "empirical_trials": count,
                              **theory_columns})
             for size in cal_sizes:
-                result = run_tscp(int(size), fixed_test, int(seed) + 1000)
+                # Estimate the marginal probability in Theorem 4.4.  Every
+                # summand redraws both C=(D1,D2) and the independent test
+                # point, rather than conditioning on one calibration split.
+                size = int(size)
+                size_covered = []
+                size_values = []
+                size_budgets = []
+                size_constraint_indicators = []
+                for size_trial in range(fixed_test):
+                    size_seed = (
+                        3_000_000_000 + int(seed) * 10_000_000
+                        + size * 1_000 + size_trial
+                    )
+                    result = run_one_random_pair(size, size_seed)
+                    result_size = float(result.sizes[0])
+                    result_budget = float(result.budgets[0])
+                    size_covered.append(float(result.covered[0]))
+                    size_values.append(result_size)
+                    size_budgets.append(result_budget)
+                    size_constraint_indicators.append(
+                        float(result_size <= result_budget)
+                    )
                 rows.append({"panel": "size", "dataset": dataset, "seed": seed, "x": int(size),
-                             "empirical": result.coverage, "average_size": result.average_size,
-                             "budget": float(result.budgets.mean()), "hard_accuracy": result.hard_constraint_accuracy})
+                             "empirical": float(np.mean(size_covered)),
+                             "average_size": float(np.mean(size_values)),
+                             "budget": float(np.mean(size_budgets)),
+                             "hard_accuracy": float(np.mean(size_constraint_indicators)),
+                             "size_trials": fixed_test})
     return pd.DataFrame(rows)
 
 
@@ -1266,12 +1290,11 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             frame[frame.panel == "size"]
             .groupby(["dataset", "x"], as_index=False)
             .agg(
-                average_size=("average_size", "mean"),
-                average_size_std=("average_size", "std"),
-                budget=("budget", "mean"),
+                hard_accuracy=("hard_accuracy", "mean"),
+                hard_accuracy_std=("hard_accuracy", "std"),
             )
         )
-        size_stats["average_size_std"] = size_stats["average_size_std"].fillna(0.0)
+        size_stats["hard_accuracy_std"] = size_stats["hard_accuracy_std"].fillna(0.0)
 
         # Coverage figure: one panel per dataset.  The empirical curve varies
         # with the test-batch prefix, whereas the independent-reference target
@@ -1295,8 +1318,9 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
         # "figure" is retained as a backward-compatible alias.
         _save_figure(coverage_fig, output, ("coverage", "figure"), config)
 
-        # Prediction-size figure: again use one panel per dataset so datasets
-        # with very different size scales do not share one axis.
+        # Validate the probabilistic size-control theorem by plotting the
+        # empirical probability P(|C_delta(X)| <= S(X)) at each calibration
+        # size.  The theorem's limiting target is one.
         size_fig, size_axes = plt.subplots(
             1, len(datasets), figsize=_plot_figsize(config, (5.2 * len(datasets), 4.5)), squeeze=False,
         )
@@ -1305,24 +1329,28 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             ax._tscp_plot_scope = "size"
             part = size_stats[size_stats.dataset == dataset].sort_values("x")
             x_values = part.x.to_numpy(dtype=float)
-            size_mean = part.average_size.to_numpy(dtype=float)
-            size_std = part.average_size_std.to_numpy(dtype=float)
-            mean_line, = ax.plot(x_values, size_mean, marker="o", label="Average size")
+            probability_mean = part.hard_accuracy.to_numpy(dtype=float)
+            probability_std = part.hard_accuracy_std.to_numpy(dtype=float)
+            mean_line, = ax.plot(
+                x_values, probability_mean, marker="o", label="Mean over seeds",
+            )
             ax.fill_between(
-                x_values, size_mean - size_std, size_mean + size_std,
+                x_values,
+                np.clip(probability_mean - probability_std, 0.0, 1.0),
+                np.clip(probability_mean + probability_std, 0.0, 1.0),
                 color=mean_line.get_color(), alpha=0.2,
             )
             ax.plot(
-                x_values, part.budget.to_numpy(dtype=float), linestyle=":",
-                color=mean_line.get_color(), label="Budget",
+                x_values, np.ones_like(x_values), linestyle="--",
+                color=mean_line.get_color(), label="Target probability",
             )
             ax.set_title(_dataset_display_name(dataset))
             ax.set_xlabel(r"Total calibration size $2n$")
             if col == 0:
-                ax.set_ylabel("Average prediction-set size")
+                ax.set_ylabel(r"$\Pr\{|C_\delta(X)| \leq S(X)\}$")
                 ax.legend(loc="best")
             ax.grid(alpha=0.25)
-        _save_figure(size_fig, output, "average_size", config)
+        _save_figure(size_fig, output, "size_control_probability", config)
 
         # Also export one publication-ready 1x2 figure per dataset.  The raw
         # dataset key remains in metrics.csv; the display name is used only as
@@ -1351,22 +1379,24 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
 
             size_part = size_stats[size_stats.dataset == dataset].sort_values("x")
             x_values = size_part.x.to_numpy(dtype=float)
-            size_mean = size_part.average_size.to_numpy(dtype=float)
-            size_std = size_part.average_size_std.to_numpy(dtype=float)
+            probability_mean = size_part.hard_accuracy.to_numpy(dtype=float)
+            probability_std = size_part.hard_accuracy_std.to_numpy(dtype=float)
             mean_line, = size_ax.plot(
-                x_values, size_mean, marker="o", label="Mean over seeds",
+                x_values, probability_mean, marker="o", label="Mean over seeds",
             )
             size_ax.fill_between(
-                x_values, size_mean - size_std, size_mean + size_std,
+                x_values,
+                np.clip(probability_mean - probability_std, 0.0, 1.0),
+                np.clip(probability_mean + probability_std, 0.0, 1.0),
                 color=mean_line.get_color(), alpha=0.2,
             )
             size_ax.plot(
-                x_values, size_part.budget.to_numpy(dtype=float),
-                linestyle=":", color=mean_line.get_color(),
-                label="Pre-chosen set size",
+                x_values, np.ones_like(x_values),
+                linestyle="--", color=mean_line.get_color(),
+                label="Target probability",
             )
             size_ax.set_xlabel(r"Total calibration size $(2 \times n)$")
-            size_ax.set_ylabel("Average set size")
+            size_ax.set_ylabel(r"$\Pr\{|C_\delta(X)| \leq S(X)\}$")
             size_ax.legend(loc="upper right")
             size_ax.grid(alpha=0.25)
 

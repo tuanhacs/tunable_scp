@@ -82,9 +82,12 @@ def test_self_validation_collector_on_small_synthetic_data(tmp_path):
     np.testing.assert_allclose(
         coverage["corrected_bound"], coverage["reference_coverage"],
     )
+    size = frame[frame["panel"] == "size"]
+    assert size["hard_accuracy"].between(0.0, 1.0).all()
     make_figures(frame, config, tmp_path)
     for name in (
-        "coverage.pdf", "coverage.png", "average_size.pdf", "average_size.png",
+        "coverage.pdf", "coverage.png",
+        "size_control_probability.pdf", "size_control_probability.png",
         "figure.pdf", "figure.png", "SyntheticRegression.pdf", "SyntheticRegression.png",
     ):
         assert (tmp_path / name).is_file()

@@ -123,7 +123,7 @@ python scripts/run_suite.py --suite configs/suites/main_paper.yaml --smoke
 
 | Config | Output |
 |---|---|
-| `self_validation_*.yaml` | Separate `coverage.*`, `average_size.*`, and title-free per-dataset 1x2 figures; `figure.*` aliases coverage |
+| `self_validation_*.yaml` | Separate `coverage.*`, `size_control_probability.*`, and title-free per-dataset 1x2 figures; `figure.*` aliases coverage |
 | `delta_*.yaml` | Coverage and average size as functions of slack `delta` |
 | `compare_ecp_*.yaml` | Coverage-size comparison of TsCP variants and eCP |
 | `hard_constraint*.yaml` | Hard-constraint satisfaction tables |
