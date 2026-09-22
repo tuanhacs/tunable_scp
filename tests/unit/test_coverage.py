@@ -32,6 +32,22 @@ def test_ecp_regression_loo_matches_explicit_point_deletion():
     np.testing.assert_allclose(actual, expected)
 
 
+def test_ecp_regression_loo_infeasibility_reports_diagnostics():
+    scores = np.ones(4)
+    scales = np.array([10.0, 1.0, 1.0, 1.0])
+    budgets = np.ones(4)
+    with pytest.raises(ValueError, match="eCP LOO size budget") as caught:
+        estimate_ecp_regression_alpha_loo(scores, scales, budgets, 1e-10)
+    message = str(caught.value)
+    for field in (
+        "invalid_count=", "first_loo_index=", "reason=",
+        "alpha_required=", "alpha_max=", "size_at_alpha_max=",
+        "budget=", "scale=", "loo_score_sum=",
+    ):
+        assert field in message
+    assert "reason=requires_alpha_above_one" in message
+
+
 def test_ecp_classification_loo_matches_explicit_point_deletion():
     candidates = np.array([
         [0.1, 0.7, 0.9], [0.6, 0.2, 0.8], [0.7, 0.9, 0.3], [0.4, 0.5, 0.8],

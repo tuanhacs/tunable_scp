@@ -826,9 +826,18 @@ def collect_loo_compare_ecp(config: dict) -> pd.DataFrame:
                             trial_split, trial_fitted, "tscp", size, budget, delta,
                             epsilon, trial_seed, 1,
                         )
-                        ecp_terms = estimate_ecp_regression_alpha_loo(
-                            all_scores[selected], fitted.scale_cal[selected], cal_budgets[selected], epsilon,
-                        )
+                        try:
+                            ecp_terms = estimate_ecp_regression_alpha_loo(
+                                all_scores[selected], fitted.scale_cal[selected],
+                                cal_budgets[selected], epsilon,
+                            )
+                        except ValueError as exc:
+                            raise ValueError(
+                                "eCP regression LOO failed: "
+                                f"dataset={dataset}, outer_seed={outer_seed}, "
+                                f"total_calibration_size={size}, trial={trial}, "
+                                f"trial_seed={trial_seed}. {exc}"
+                            ) from exc
                     else:
                         trial_fitted = replace(fitted, probs_test=fitted.probs_test[[test_index]])
                         cal_scores = classification_scores(fitted.probs_cal, ecp_score_type)

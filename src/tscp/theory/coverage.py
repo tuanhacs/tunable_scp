@@ -44,7 +44,8 @@ def estimate_ecp_regression_alpha_loo(
         raise ValueError("Regression eCP requires positive size budgets.")
     loo_totals = float(scores.sum()) - scores
     # The LOO calibration size is n-1, so the eCP denominator is alpha*n-1.
-    alphas = np.maximum(epsilon, (1.0 + 2.0 * scales * loo_totals / budgets) / n)
+    required_alphas = (1.0 + 2.0 * scales * loo_totals / budgets) / n
+    alphas = np.maximum(epsilon, required_alphas)
     for _ in range(4):
         denominators = alphas * n - 1.0
         feasible = (denominators > 0) & (
@@ -53,8 +54,36 @@ def estimate_ecp_regression_alpha_loo(
         if np.all(feasible):
             break
         alphas = np.where(feasible, alphas, np.nextafter(alphas, 1.0))
-    if np.any(~feasible) or np.any(alphas > 1.0 - epsilon):
-        raise ValueError("No alpha in [epsilon, 1-epsilon] satisfies the eCP size budget.")
+    # Re-evaluate after the final nextafter adjustment; the last update may
+    # itself have moved a boundary case into the feasible region.
+    denominators = alphas * n - 1.0
+    feasible = (denominators > 0) & (
+        2.0 * scales * loo_totals <= budgets * denominators
+    )
+    upper_alpha = 1.0 - epsilon
+    invalid = ~feasible | (alphas > upper_alpha)
+    if np.any(invalid):
+        index = int(np.flatnonzero(invalid)[0])
+        required = float(required_alphas[index])
+        reason = (
+            "requires_alpha_above_one" if required > 1.0 else
+            "epsilon_upper_boundary" if required > upper_alpha else
+            "numerical_boundary_check"
+        )
+        max_denominator = upper_alpha * n - 1.0
+        minimum_size = (
+            float(2.0 * scales[index] * loo_totals[index] / max_denominator)
+            if max_denominator > 0 else float("inf")
+        )
+        raise ValueError(
+            "No alpha in [epsilon, 1-epsilon] satisfies the eCP LOO size budget: "
+            f"invalid_count={int(invalid.sum())}/{n}, first_loo_index={index}, "
+            f"reason={reason}, alpha_required={required:.17g}, "
+            f"alpha_max={upper_alpha:.17g}, "
+            f"size_at_alpha_max={minimum_size:.17g}, "
+            f"budget={budgets[index]:.17g}, scale={scales[index]:.17g}, "
+            f"loo_score_sum={loo_totals[index]:.17g}."
+        )
     return alphas
 
 
