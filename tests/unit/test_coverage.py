@@ -32,20 +32,19 @@ def test_ecp_regression_loo_matches_explicit_point_deletion():
     np.testing.assert_allclose(actual, expected)
 
 
-def test_ecp_regression_loo_infeasibility_reports_diagnostics():
+def test_ecp_regression_loo_falls_back_and_reports_mask():
     scores = np.ones(4)
     scales = np.array([10.0, 1.0, 1.0, 1.0])
     budgets = np.ones(4)
-    with pytest.raises(ValueError, match="eCP LOO size budget") as caught:
-        estimate_ecp_regression_alpha_loo(scores, scales, budgets, 1e-10)
-    message = str(caught.value)
-    for field in (
-        "invalid_count=", "first_loo_index=", "reason=",
-        "alpha_required=", "alpha_max=", "size_at_alpha_max=",
-        "budget=", "scale=", "loo_score_sum=",
-    ):
-        assert field in message
-    assert "reason=requires_alpha_above_one" in message
+    alphas, fallback_mask = estimate_ecp_regression_alpha_loo(
+        scores, scales, budgets, 1e-10, return_fallbacks=True,
+    )
+    assert fallback_mask[0]
+    assert alphas[0] == pytest.approx(1.0 - 1e-10)
+    np.testing.assert_allclose(alphas, [
+        ECPRegression(np.delete(scores, i), 1e-10).predict_one(0.0, scales[i], budgets[i])[1]
+        for i in range(len(scores))
+    ])
 
 
 def test_ecp_classification_loo_matches_explicit_point_deletion():
@@ -110,13 +109,18 @@ def test_ecp_regression_large_budget_is_feasible():
     assert interval[1] - interval[0] <= 500.0
 
 
-def test_ecp_regression_infeasibility_reports_reference_diagnostics():
+def test_ecp_regression_infeasibility_falls_back_to_upper_alpha():
     method = ECPRegression(np.full(499, 496.4618698511901 / 499), 1e-10)
-    with pytest.raises(ValueError, match="requires_alpha_above_one") as caught:
-        method.predict_one(0.0, 7.563318567907845, 15.0)
-    message = str(caught.value)
-    for field in ("alpha_required=", "size_at_alpha_max=", "budget=", "scale="):
-        assert field in message
+    interval, alpha = method.predict_one(0.0, 7.563318567907845, 15.0)
+    assert alpha == pytest.approx(1.0 - 1e-10)
+    assert interval[1] - interval[0] > 15.0
+
+
+def test_ecp_classification_infeasibility_falls_back_to_upper_alpha():
+    method = ECPClassification(np.array([0.1, 0.1, 0.1]), 1e-10)
+    prediction_set, alpha = method.predict_one(np.array([0.1, 0.1, 0.1]), 0.0)
+    assert alpha == pytest.approx(1.0 - 1e-10)
+    assert prediction_set.sum() > 0
 
 
 def test_ecp_classification_uses_exact_evalue_breakpoint():

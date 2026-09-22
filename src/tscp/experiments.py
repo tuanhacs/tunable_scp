@@ -773,6 +773,7 @@ def collect_loo_compare_ecp(config: dict) -> pd.DataFrame:
                 # Estimate each target expectation using an independent seed
                 # stream.  Every draw resamples calibration and one test point.
                 reference_covered = {"truncated_eCP": [], "TsCP": []}
+                ecp_reference_budget_violations = []
                 for reference_trial in range(reference_trials):
                     reference_seed = (
                         1_000_000_000 + int(outer_seed) * 10_000_000
@@ -814,6 +815,9 @@ def collect_loo_compare_ecp(config: dict) -> pd.DataFrame:
                         )
                     reference_covered["truncated_eCP"].append(float(ecp_reference.covered[0]))
                     reference_covered["TsCP"].append(float(tscp_reference.covered[0]))
+                    ecp_reference_budget_violations.append(
+                        float(ecp_reference.sizes[0] > ecp_reference.budgets[0])
+                    )
 
                 reference_stats = {}
                 for method_name in ("truncated_eCP", "TsCP"):
@@ -837,9 +841,9 @@ def collect_loo_compare_ecp(config: dict) -> pd.DataFrame:
                             epsilon, trial_seed, 1,
                         )
                         try:
-                            ecp_terms = estimate_ecp_regression_alpha_loo(
+                            ecp_terms, ecp_fallbacks = estimate_ecp_regression_alpha_loo(
                                 all_scores[selected], fitted.scale_cal[selected],
-                                cal_budgets[selected], epsilon,
+                                cal_budgets[selected], epsilon, return_fallbacks=True,
                             )
                         except ValueError as exc:
                             raise ValueError(
@@ -859,8 +863,9 @@ def collect_loo_compare_ecp(config: dict) -> pd.DataFrame:
                             trial_split, trial_fitted, "tscp", size, budget, delta,
                             epsilon, trial_seed, 1, score_type, tie_epsilon,
                         )
-                        ecp_terms = estimate_ecp_classification_alpha_loo(
-                            true_scores[selected], cal_scores[selected], cal_budgets[selected], epsilon,
+                        ecp_terms, ecp_fallbacks = estimate_ecp_classification_alpha_loo(
+                            true_scores[selected], cal_scores[selected], cal_budgets[selected],
+                            epsilon, return_fallbacks=True,
                         )
 
                     tscp_estimate = tscp_result.coverage_estimate
@@ -886,6 +891,12 @@ def collect_loo_compare_ecp(config: dict) -> pd.DataFrame:
                             "coverage_estimate": 1.0 - estimate_value,
                             "reference_empirical_coverage": stats["empirical_coverage"],
                             "reference_coverage_standard_error": stats["coverage_standard_error"],
+                            "ecp_loo_fallback_count": int(ecp_fallbacks.sum()) if method_name == "truncated_eCP" else np.nan,
+                            "ecp_loo_fallback_rate": float(ecp_fallbacks.mean()) if method_name == "truncated_eCP" else np.nan,
+                            "ecp_reference_budget_violation_rate": (
+                                float(np.mean(ecp_reference_budget_violations))
+                                if method_name == "truncated_eCP" else np.nan
+                            ),
                         })
     return pd.DataFrame(rows)
 
@@ -1115,6 +1126,8 @@ def summarize_loo_compare(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
         mean_coverage_estimate=("coverage_estimate", "mean"),
         empirical_coverage=("reference_empirical_coverage", "first"),
         empirical_coverage_standard_error=("reference_coverage_standard_error", "first"),
+        ecp_loo_fallback_rate=("ecp_loo_fallback_rate", "mean"),
+        ecp_reference_budget_violation_rate=("ecp_reference_budget_violation_rate", "first"),
     )
     per_seed["coverage_gap"] = np.abs(
         per_seed["mean_coverage_estimate"] - per_seed["empirical_coverage"]
@@ -1132,6 +1145,8 @@ def summarize_loo_compare(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
         coverage_gap_mean=("coverage_gap", "mean"),
         coverage_gap_std=("coverage_gap", "std"),
         empirical_coverage_mc_standard_error_mean=("empirical_coverage_standard_error", "mean"),
+        ecp_loo_fallback_rate_mean=("ecp_loo_fallback_rate", "mean"),
+        ecp_reference_budget_violation_rate_mean=("ecp_reference_budget_violation_rate", "mean"),
     )
     for column in ("variance_std", "coverage_gap_std"):
         summary[column] = summary[column].fillna(0.0)
@@ -1689,6 +1704,10 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
         per_seed.to_csv(output / "loo_compare_points_by_seed.csv", index=False)
         loo_compare_report_table(summary).to_csv(output / "loo_compare_points.csv", index=False)
         loo_coverage_report_table(summary).to_csv(output / "loo_coverage_points.csv", index=False)
+        summary.loc[summary.method == "truncated_eCP", [
+            "dataset", "calibration_size", "ecp_loo_fallback_rate_mean",
+            "ecp_reference_budget_violation_rate_mean",
+        ]].to_csv(output / "ecp_fallback_summary.csv", index=False)
         styles = {
             "truncated_eCP": ("tab:blue", "o", r"eCP"),
             "TsCP": ("tab:orange", "s", r"TsCP"),

@@ -139,10 +139,12 @@ def test_loo_comparison_uses_one_random_test_point_per_trial():
 
     assert set(frame["number_test"]) == {1}
     assert frame.groupby(["outer_seed", "trial"])["test_index"].nunique().eq(1).all()
+    assert {"ecp_loo_fallback_count", "ecp_loo_fallback_rate", "ecp_reference_budget_violation_rate"} <= set(frame.columns)
     per_seed, points = summarize_loo_compare(frame)
     assert len(per_seed) == 2
     assert len(points) == 2
     assert {"variance_mean", "coverage_gap_mean", "empirical_coverage_mean"} <= set(points.columns)
+    assert {"ecp_loo_fallback_rate_mean", "ecp_reference_budget_violation_rate_mean"} <= set(points.columns)
     report = loo_compare_report_table(points)
     assert list(report.columns) == [
         "dataset", "total_calibration_size", "ecp_variance", "tscp_variance",

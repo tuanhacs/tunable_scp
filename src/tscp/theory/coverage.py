@@ -31,7 +31,8 @@ def estimate_ecp_regression_alpha_loo(
     scales: np.ndarray,
     budgets: np.ndarray,
     epsilon: float,
-) -> np.ndarray:
+    return_fallbacks: bool = False,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     """Per-observation truncated-eCP adaptive levels after LOO deletion."""
     scores = np.asarray(calibration_scores, dtype=float)
     scales = np.maximum(np.asarray(scales, dtype=float), 1e-12)
@@ -45,45 +46,25 @@ def estimate_ecp_regression_alpha_loo(
     loo_totals = float(scores.sum()) - scores
     # The LOO calibration size is n-1, so the eCP denominator is alpha*n-1.
     required_alphas = (1.0 + 2.0 * scales * loo_totals / budgets) / n
-    alphas = np.maximum(epsilon, required_alphas)
-    for _ in range(4):
+    upper_alpha = 1.0 - epsilon
+    max_denominator = upper_alpha * n - 1.0
+    fallback_mask = np.full(n, max_denominator <= 0, dtype=bool)
+    if max_denominator > 0:
+        fallback_mask = 2.0 * scales * loo_totals / max_denominator > budgets
+    alphas = np.minimum(np.maximum(epsilon, required_alphas), upper_alpha)
+    for _ in range(64):
         denominators = alphas * n - 1.0
         feasible = (denominators > 0) & (
-            2.0 * scales * loo_totals <= budgets * denominators
+            2.0 * scales * loo_totals / denominators <= budgets
         )
-        if np.all(feasible):
+        if np.all(feasible | fallback_mask):
             break
-        alphas = np.where(feasible, alphas, np.nextafter(alphas, 1.0))
-    # Re-evaluate after the final nextafter adjustment; the last update may
-    # itself have moved a boundary case into the feasible region.
+        alphas = np.where(feasible | fallback_mask, alphas, np.minimum(np.nextafter(alphas, 1.0), upper_alpha))
     denominators = alphas * n - 1.0
-    feasible = (denominators > 0) & (
-        2.0 * scales * loo_totals <= budgets * denominators
-    )
-    upper_alpha = 1.0 - epsilon
-    invalid = ~feasible | (alphas > upper_alpha)
-    if np.any(invalid):
-        index = int(np.flatnonzero(invalid)[0])
-        required = float(required_alphas[index])
-        reason = (
-            "requires_alpha_above_one" if required > 1.0 else
-            "epsilon_upper_boundary" if required > upper_alpha else
-            "numerical_boundary_check"
-        )
-        max_denominator = upper_alpha * n - 1.0
-        minimum_size = (
-            float(2.0 * scales[index] * loo_totals[index] / max_denominator)
-            if max_denominator > 0 else float("inf")
-        )
-        raise ValueError(
-            "No alpha in [epsilon, 1-epsilon] satisfies the eCP LOO size budget: "
-            f"invalid_count={int(invalid.sum())}/{n}, first_loo_index={index}, "
-            f"reason={reason}, alpha_required={required:.17g}, "
-            f"alpha_max={upper_alpha:.17g}, "
-            f"size_at_alpha_max={minimum_size:.17g}, "
-            f"budget={budgets[index]:.17g}, scale={scales[index]:.17g}, "
-            f"loo_score_sum={loo_totals[index]:.17g}."
-        )
+    feasible = (denominators > 0) & (2.0 * scales * loo_totals / denominators <= budgets)
+    alphas = np.where(feasible, alphas, upper_alpha)
+    if return_fallbacks:
+        return alphas, fallback_mask
     return alphas
 
 
@@ -92,7 +73,8 @@ def estimate_ecp_classification_alpha_loo(
     candidate_scores: np.ndarray,
     budgets: np.ndarray,
     epsilon: float,
-) -> np.ndarray:
+    return_fallbacks: bool = False,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     """Per-observation truncated-eCP adaptive levels after LOO deletion."""
     true_scores = np.asarray(true_scores, dtype=float)
     candidates = np.asarray(candidate_scores, dtype=float)
@@ -103,11 +85,19 @@ def estimate_ecp_classification_alpha_loo(
     if len(candidates) != n:
         raise ValueError("Candidate-score rows must align with true-label scores.")
     total = float(true_scores.sum())
-    return np.asarray([
+    alphas = np.asarray([
         ecp_classification_alpha(candidates[i], total - true_scores[i], n - 1,
                                  budgets[i], epsilon)
         for i in range(n)
     ])
+    if not return_fallbacks:
+        return alphas
+    fallback_mask = np.empty(n, dtype=bool)
+    for i in range(n):
+        denominator = (total - true_scores[i] + candidates[i]) / n
+        e_values = candidates[i] / np.maximum(denominator, 1e-12)
+        fallback_mask[i] = np.count_nonzero(alphas[i] * e_values < 1.0) > np.floor(budgets[i])
+    return alphas, fallback_mask
 
 
 def estimate_classification_coverage(
