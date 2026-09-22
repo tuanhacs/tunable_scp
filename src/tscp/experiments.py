@@ -20,15 +20,15 @@ from .evaluation import classification_scores, evaluate_classification, evaluate
 from .methods.ecp import ECPClassification, ECPRegression
 from .methods.tscp import TsCPClassification, TsCPRegression
 from .models import fit_classification, fit_regression
-from .quantiles import conformal_quantile
+from .quantiles import conformal_quantile, validate_epsilon
 from .theory.coverage import estimate_ecp_classification_alpha_loo, estimate_ecp_regression_alpha_loo
 
 
-def alpha_grid(config: dict) -> np.ndarray:
-    value = config.get("method", {}).get("alpha_grid", {})
-    if isinstance(value, list):
-        return np.asarray(value, dtype=float)
-    return np.linspace(float(value.get("start", 0.01)), float(value.get("stop", 0.99)), int(value.get("steps", 99)))
+def alpha_epsilon(config: dict) -> float:
+    method = config.get("method", {})
+    if "alpha_grid" in method:
+        raise ValueError("method.alpha_grid is obsolete; set method.epsilon instead.")
+    return validate_epsilon(method.get("epsilon", 1e-10))
 
 
 def budget_for_dataset(config: dict, dataset: str, kind: str | None = None, value: float | None = None) -> BudgetSpec:
@@ -71,12 +71,12 @@ def evaluate(config: dict, dataset: str, seed: int, *, method: str = "tscp", cal
     number_test = int(number_test or data_cfg.get("fixed_number_test_samples", 1000))
     delta = float(method_cfg.get("delta", 0.1) if delta is None else delta)
     budget = budget or budget_for_dataset(config, dataset)
-    grid = alpha_grid(config)
+    epsilon = alpha_epsilon(config)
     if task == "regression":
-        return task, evaluate_regression(split, fitted, method, calibration_size, budget, delta, grid, seed + 1000, number_test)
+        return task, evaluate_regression(split, fitted, method, calibration_size, budget, delta, epsilon, seed + 1000, number_test)
     score = score_type or method_cfg.get("score", "one_minus_probability")
     return task, evaluate_classification(
-        split, fitted, method, calibration_size, budget, delta, grid, seed + 1000,
+        split, fitted, method, calibration_size, budget, delta, epsilon, seed + 1000,
         number_test, score, float(method_cfg.get("tie_break_epsilon", 0.0)),
     )
 
@@ -112,7 +112,7 @@ def collect_self_validation(config: dict) -> pd.DataFrame:
     cal_sizes = config["data"]["total_calibration_sizes"]
     fixed_cal = int(config["data"]["total_calibration_size"])
     fixed_test = int(config["data"]["fixed_number_test_samples"])
-    grid = alpha_grid(config)
+    epsilon = alpha_epsilon(config)
     delta = float(method_cfg.get("delta", 0.1))
     score_type = method_cfg.get("score", "one_minus_probability")
     tie_break_epsilon = float(method_cfg.get("tie_break_epsilon", 0.0))
@@ -127,11 +127,11 @@ def collect_self_validation(config: dict) -> pd.DataFrame:
                 if task == "regression":
                     return evaluate_regression(
                         trial_split, trial_fitted, "tscp", calibration_size, budget,
-                        delta, grid, run_seed, number_test, estimate_coverage=False,
+                        delta, epsilon, run_seed, number_test, estimate_coverage=False,
                     )
                 return evaluate_classification(
                     trial_split, trial_fitted, "tscp", calibration_size, budget,
-                    delta, grid, run_seed, number_test, score_type,
+                    delta, epsilon, run_seed, number_test, score_type,
                     tie_break_epsilon, estimate_coverage=False,
                 )
 
@@ -301,7 +301,7 @@ def collect_compare(config: dict) -> pd.DataFrame:
     names = [str(variant["name"]) for variant in variants]
     if len(names) != len(set(names)):
         raise ValueError("compare_ecp variant names must be unique.")
-    grid = alpha_grid(config)
+    epsilon = alpha_epsilon(config)
     tie_epsilon = float(method_config.get("tie_break_epsilon", 0.0))
 
     def budget_values(dataset: str, task: str) -> np.ndarray:
@@ -378,9 +378,9 @@ def collect_compare(config: dict) -> pd.DataFrame:
 
                     if task == "regression":
                         if method_name == "tscp":
-                            method = TsCPRegression(regression_scores[d1], regression_scores[d2], grid, delta)
+                            method = TsCPRegression(regression_scores[d1], regression_scores[d2], epsilon, delta)
                         elif method_name == "ecp":
-                            method = ECPRegression(regression_scores[selected], grid)
+                            method = ECPRegression(regression_scores[selected], epsilon)
                         else:
                             raise ValueError(f"Unknown compare_ecp method {method_name!r}.")
                     else:
@@ -403,10 +403,10 @@ def collect_compare(config: dict) -> pd.DataFrame:
                         selected_scores, test_scores, true_selected = classification_score_cache[score_type]
                         if method_name == "tscp":
                             method = TsCPClassification(
-                                true_selected[: total // 2], true_selected[total // 2 :], grid, delta,
+                                true_selected[: total // 2], true_selected[total // 2 :], epsilon, delta,
                             )
                         elif method_name == "ecp":
-                            method = ECPClassification(true_selected, grid)
+                            method = ECPClassification(true_selected, epsilon)
                         else:
                             raise ValueError(f"Unknown compare_ecp method {method_name!r}.")
 
@@ -520,7 +520,7 @@ def collect_model_ablation(config: dict) -> pd.DataFrame:
     reference_trials = int(experiment.get("reference_trials", 500))
     if min(test_sizes) < 1 or size_trials < 1 or reference_trials < 1:
         raise ValueError("model_ablation test counts, size_trials and reference_trials must be positive.")
-    grid = alpha_grid(config)
+    epsilon = alpha_epsilon(config)
     delta = float(method_cfg.get("delta", 0.1))
     score_type = str(method_cfg.get("score", "one_minus_probability"))
     tie_break_epsilon = float(method_cfg.get("tie_break_epsilon", 0.0))
@@ -549,7 +549,7 @@ def collect_model_ablation(config: dict) -> pd.DataFrame:
                         )
                         return evaluate_regression(
                             trial_split, trial_fitted, "tscp", calibration_size,
-                            budget, delta, grid, run_seed, 1,
+                            budget, delta, epsilon, run_seed, 1,
                             estimate_coverage=False,
                         )
                     trial_fitted = replace(
@@ -558,7 +558,7 @@ def collect_model_ablation(config: dict) -> pd.DataFrame:
                     )
                     return evaluate_classification(
                         trial_split, trial_fitted, "tscp", calibration_size,
-                        budget, delta, grid, run_seed, 1, score_type,
+                        budget, delta, epsilon, run_seed, 1, score_type,
                         tie_break_epsilon, estimate_coverage=False,
                     )
 
@@ -671,7 +671,7 @@ def collect_loo_histogram(config: dict) -> pd.DataFrame:
     method_cfg = config.get("method", {})
     trials = int(config.get("experiment", {}).get("trials", 200))
     number_test = int(data_cfg.get("fixed_number_test_samples", 2000))
-    grid = alpha_grid(config)
+    epsilon = alpha_epsilon(config)
     delta = float(method_cfg.get("delta", 0.1))
     score_type = method_cfg.get("score", "one_minus_probability")
     tie_break_epsilon = float(method_cfg.get("tie_break_epsilon", 0.0))
@@ -687,12 +687,12 @@ def collect_loo_histogram(config: dict) -> pd.DataFrame:
                     trial_seed = int(outer_seed) * 10_000_000 + size * 1_000 + trial
                     if task == "regression":
                         result = evaluate_regression(
-                            split, fitted, "tscp", size, budget, delta, grid,
+                            split, fitted, "tscp", size, budget, delta, epsilon,
                             trial_seed, number_test,
                         )
                     else:
                         result = evaluate_classification(
-                            split, fitted, "tscp", size, budget, delta, grid,
+                            split, fitted, "tscp", size, budget, delta, epsilon,
                             trial_seed, number_test, score_type, tie_break_epsilon,
                         )
                     estimate = result.coverage_estimate
@@ -733,7 +733,7 @@ def collect_loo_compare_ecp(config: dict) -> pd.DataFrame:
         raise ValueError("LOO comparison requires at least two evaluation trials for variance.")
     if reference_trials < 2:
         raise ValueError("LOO comparison requires at least two independent reference trials.")
-    grid = alpha_grid(config)
+    epsilon = alpha_epsilon(config)
     delta = float(method_cfg.get("delta", 0.1))
     score_type = method_cfg.get("score", "one_minus_probability")
     ecp_score_type = experiment_cfg.get("ecp_score", score_type)
@@ -785,21 +785,21 @@ def collect_loo_compare_ecp(config: dict) -> pd.DataFrame:
                     if task == "regression":
                         tscp_reference = evaluate_regression(
                             trial_split, trial_fitted, "tscp", size, budget, delta,
-                            grid, reference_seed, 1, estimate_coverage=False,
+                            epsilon, reference_seed, 1, estimate_coverage=False,
                         )
                         ecp_reference = evaluate_regression(
                             trial_split, trial_fitted, "ecp", size, budget, delta,
-                            grid, reference_seed, 1, estimate_coverage=False,
+                            epsilon, reference_seed, 1, estimate_coverage=False,
                         )
                     else:
                         tscp_reference = evaluate_classification(
                             trial_split, trial_fitted, "tscp", size, budget, delta,
-                            grid, reference_seed, 1, score_type, tie_epsilon,
+                            epsilon, reference_seed, 1, score_type, tie_epsilon,
                             estimate_coverage=False,
                         )
                         ecp_reference = evaluate_classification(
                             trial_split, trial_fitted, "ecp", size, budget, delta,
-                            grid, reference_seed, 1, ecp_score_type, tie_epsilon,
+                            epsilon, reference_seed, 1, ecp_score_type, tie_epsilon,
                             estimate_coverage=False,
                         )
                     reference_covered["truncated_eCP"].append(float(ecp_reference.covered[0]))
@@ -824,10 +824,10 @@ def collect_loo_compare_ecp(config: dict) -> pd.DataFrame:
                     if task == "regression":
                         tscp_result = evaluate_regression(
                             trial_split, trial_fitted, "tscp", size, budget, delta,
-                            grid, trial_seed, 1,
+                            epsilon, trial_seed, 1,
                         )
                         ecp_terms = estimate_ecp_regression_alpha_loo(
-                            all_scores[selected], fitted.scale_cal[selected], cal_budgets[selected], grid,
+                            all_scores[selected], fitted.scale_cal[selected], cal_budgets[selected], epsilon,
                         )
                     else:
                         trial_fitted = replace(fitted, probs_test=fitted.probs_test[[test_index]])
@@ -838,10 +838,10 @@ def collect_loo_compare_ecp(config: dict) -> pd.DataFrame:
                         true_scores = cal_scores[np.arange(len(split.y_cal)), split.y_cal.astype(int)]
                         tscp_result = evaluate_classification(
                             trial_split, trial_fitted, "tscp", size, budget, delta,
-                            grid, trial_seed, 1, score_type, tie_epsilon,
+                            epsilon, trial_seed, 1, score_type, tie_epsilon,
                         )
                         ecp_terms = estimate_ecp_classification_alpha_loo(
-                            true_scores[selected], cal_scores[selected], cal_budgets[selected], grid,
+                            true_scores[selected], cal_scores[selected], cal_budgets[selected], epsilon,
                         )
 
                     tscp_estimate = tscp_result.coverage_estimate
@@ -881,15 +881,15 @@ def collect_runtime(config: dict) -> pd.DataFrame:
             total = int(config["data"].get("total_calibration_size", 2000))
             idx = np.random.default_rng(seed + 1000).choice(len(split.y_cal), total, replace=False)
             d1, d2 = idx[: total // 2], idx[total // 2 :]
-            grid = alpha_grid(config)
+            epsilon = alpha_epsilon(config)
             fixed_alpha = float(config["experiment"].get("fixed_alpha", 0.1))
             delta = float(config["method"].get("delta", 0.1))
             spec = budget_for_dataset(config, dataset)
             if task == "regression":
                 scores = np.abs(split.y_cal - fitted.pred_cal) / np.maximum(fitted.scale_cal, 1e-12)
                 q_scp = conformal_quantile(scores[idx], fixed_alpha)
-                tscp = TsCPRegression(scores[d1], scores[d2], grid, delta)
-                ecp_tpss = ECPRegression(scores[idx], grid)
+                tscp = TsCPRegression(scores[d1], scores[d2], epsilon, delta)
+                ecp_tpss = ECPRegression(scores[idx], epsilon)
                 denom = fixed_alpha * (len(idx) + 1) - 1.0
                 ecp_fixed_radius_score = float("inf") if denom <= 0 else scores[idx].sum() / denom
                 test_budgets = evaluate_budget(spec, normalized_uncertainty(fitted.scale_test, fitted.scale_reference))
@@ -899,8 +899,8 @@ def collect_runtime(config: dict) -> pd.DataFrame:
                 test_scores = classification_scores(fitted.probs_test, score_type)
                 true_scores = cal_scores[np.arange(len(split.y_cal)), split.y_cal.astype(int)]
                 q_scp = conformal_quantile(true_scores[idx], fixed_alpha)
-                tscp = TsCPClassification(true_scores[d1], true_scores[d2], grid, delta)
-                ecp_tpss = ECPClassification(true_scores[idx], grid)
+                tscp = TsCPClassification(true_scores[d1], true_scores[d2], epsilon, delta)
+                ecp_tpss = ECPClassification(true_scores[idx], epsilon)
                 test_budgets = evaluate_budget(spec, classification_uncertainty(fitted.probs_test), classification=True)
             for count in config["data"]["number_test_samples"]:
                 count = min(int(count), len(split.y_test))

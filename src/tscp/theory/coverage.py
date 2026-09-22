@@ -4,7 +4,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..methods.tscp import TsCPClassification, TsCPRegression
-from ..quantiles import conformal_quantile
+from ..methods.ecp import ecp_classification_alpha
+from ..quantiles import minimum_alpha_for_rank, sorted_conformal_quantiles, validate_epsilon
 
 
 @dataclass(frozen=True)
@@ -25,79 +26,59 @@ def _result(alpha_terms: list[float], delta_terms: list[float]) -> CoverageEstim
     return CoverageEstimate(alpha_hat, delta_hat, 1.0 - alpha_hat, 1.0 - alpha_hat - delta_hat, alpha, delta)
 
 
-def _loo_quantiles(scores: np.ndarray, alpha_grid: np.ndarray) -> np.ndarray:
-    """All leave-one-out conformal quantiles in O(n log n + n*|grid|)."""
-    values = np.asarray(scores, dtype=float)
-    grid = np.asarray(alpha_grid, dtype=float)
-    n = len(values)
-    if n < 2:
-        raise ValueError("LOO coverage estimation requires at least two D1 scores.")
-    order = np.argsort(values, kind="stable")
-    sorted_values = values[order]
-    full_ranks = np.empty(n, dtype=int)
-    full_ranks[order] = np.arange(n)
-    output = np.empty((n, len(grid)), dtype=float)
-    reduced_size = n - 1
-    for j, alpha in enumerate(grid):
-        rank = int(np.ceil((reduced_size + 1) * (1.0 - alpha)))
-        if rank > reduced_size:
-            output[:, j] = np.inf
-            continue
-        base = rank - 1
-        indices = base + (full_ranks <= base)
-        output[:, j] = sorted_values[indices]
-    return output
-
-
 def estimate_ecp_regression_alpha_loo(
     calibration_scores: np.ndarray,
     scales: np.ndarray,
     budgets: np.ndarray,
-    alpha_grid: np.ndarray,
+    epsilon: float,
 ) -> np.ndarray:
     """Per-observation truncated-eCP adaptive levels after LOO deletion."""
     scores = np.asarray(calibration_scores, dtype=float)
     scales = np.maximum(np.asarray(scales, dtype=float), 1e-12)
     budgets = np.asarray(budgets, dtype=float)
-    grid = np.asarray(alpha_grid, dtype=float)
     n = len(scores)
     if n < 2:
         raise ValueError("eCP LOO estimation requires at least two calibration scores.")
-    # After deleting i there are n-1 calibration scores.  The eCP denominator
-    # for candidate alpha is alpha*((n-1)+1)-1 = alpha*n-1.
-    denominators = grid * n - 1.0
-    radius_scores = np.full((n, len(grid)), np.inf)
-    valid = denominators > 0
-    radius_scores[:, valid] = (scores.sum() - scores)[:, None] / denominators[valid]
-    feasible = 2.0 * scales[:, None] * radius_scores <= budgets[:, None]
-    first = np.argmax(feasible, axis=1)
-    first[~np.any(feasible, axis=1)] = len(grid) - 1
-    return grid[first]
+    epsilon = validate_epsilon(epsilon)
+    if np.any(budgets <= 0):
+        raise ValueError("Regression eCP requires positive size budgets.")
+    loo_totals = float(scores.sum()) - scores
+    # The LOO calibration size is n-1, so the eCP denominator is alpha*n-1.
+    alphas = np.maximum(epsilon, (1.0 + 2.0 * scales * loo_totals / budgets) / n)
+    for _ in range(4):
+        denominators = alphas * n - 1.0
+        feasible = (denominators > 0) & (
+            2.0 * scales * loo_totals <= budgets * denominators
+        )
+        if np.all(feasible):
+            break
+        alphas = np.where(feasible, alphas, np.nextafter(alphas, 1.0))
+    if np.any(~feasible) or np.any(alphas > 1.0 - epsilon):
+        raise ValueError("No alpha in [epsilon, 1-epsilon] satisfies the eCP size budget.")
+    return alphas
 
 
 def estimate_ecp_classification_alpha_loo(
     true_scores: np.ndarray,
     candidate_scores: np.ndarray,
     budgets: np.ndarray,
-    alpha_grid: np.ndarray,
+    epsilon: float,
 ) -> np.ndarray:
     """Per-observation truncated-eCP adaptive levels after LOO deletion."""
     true_scores = np.asarray(true_scores, dtype=float)
     candidates = np.asarray(candidate_scores, dtype=float)
     budgets = np.asarray(budgets, dtype=float)
-    grid = np.asarray(alpha_grid, dtype=float)
     n = len(true_scores)
     if n < 2:
         raise ValueError("eCP LOO estimation requires at least two calibration scores.")
     if len(candidates) != n:
         raise ValueError("Candidate-score rows must align with true-label scores.")
-    denominators = ((true_scores.sum() - true_scores)[:, None] + candidates) / n
-    e_values = candidates / np.maximum(denominators, 1e-12)
-    sizes = np.sum(e_values[:, None, :] < 1.0 / grid[None, :, None], axis=2)
-    feasible = sizes <= budgets[:, None]
-    first = np.argmax(feasible, axis=1)
-    first[~np.any(feasible, axis=1)] = len(grid) - 1
-    return grid[first]
+    total = float(true_scores.sum())
+    return np.asarray([
+        ecp_classification_alpha(candidates[i], total - true_scores[i], n - 1,
+                                 budgets[i], epsilon)
+        for i in range(n)
+    ])
 
 
 def estimate_classification_coverage(
@@ -112,13 +93,21 @@ def estimate_classification_coverage(
     budgets = np.asarray(d1_budgets, dtype=float)
     if len(all_scores) != len(method.scores_d1):
         raise ValueError("D1 candidate scores must align with D1 true-label scores.")
-    loo_q1 = _loo_quantiles(method.scores_d1, method.alpha_grid)
-    sizes = np.sum(all_scores[:, None, :] <= loo_q1[:, :, None], axis=2)
-    feasible = sizes <= (budgets - method.delta)[:, None]
-    first = np.argmax(feasible, axis=1)
-    first[~np.any(feasible, axis=1)] = len(method.alpha_grid) - 1
-    alpha = method.alpha_grid[first]
-    q2 = method.q2_grid[first]
+    n = len(method.scores_d1)
+    if n < 2:
+        raise ValueError("LOO coverage estimation requires at least two D1 scores.")
+    allowed = np.floor(budgets - method.delta).astype(int)
+    if np.any(allowed < 0):
+        raise ValueError("The theoretical construction requires S(x)-delta >= 0.")
+    candidate_count = all_scores.shape[1]
+    clipped = np.minimum(allowed, candidate_count - 1)
+    cutoffs = np.sort(all_scores, axis=1)[np.arange(n), clipped]
+    max_ranks = np.searchsorted(method.ordered_d1, cutoffs, side="left")
+    max_ranks -= (method.scores_d1 < cutoffs).astype(int)
+    # A budget admitting every label also admits the infinity quantile.
+    max_ranks[allowed >= candidate_count] = n
+    alpha = minimum_alpha_for_rank(max_ranks, n - 1, method.epsilon)
+    q2 = sorted_conformal_quantiles(method.ordered_d2, alpha)
     misses = (all_scores[np.arange(len(all_scores)), labels] > q2).astype(float)
     alpha_terms = alpha.tolist()
     delta_terms = (misses - alpha).tolist()
@@ -139,12 +128,17 @@ def estimate_regression_coverage(
     if len(predictions) != len(method.scores_d1):
         raise ValueError("D1 observations must align with D1 scores.")
     true_scores = np.abs(targets - predictions) / np.maximum(scales, 1e-12)
-    loo_q1 = _loo_quantiles(method.scores_d1, method.alpha_grid)
-    feasible = 2.0 * np.maximum(scales, 1e-12)[:, None] * loo_q1 <= (budgets - method.delta)[:, None]
-    first = np.argmax(feasible, axis=1)
-    first[~np.any(feasible, axis=1)] = len(method.alpha_grid) - 1
-    alpha = method.alpha_grid[first]
-    q2 = method.q2_grid[first]
+    n = len(method.scores_d1)
+    if n < 2:
+        raise ValueError("LOO coverage estimation requires at least two D1 scores.")
+    targets = budgets - method.delta
+    if np.any(targets < 0):
+        raise ValueError("The theoretical construction requires S(x)-delta >= 0.")
+    thresholds = targets / (2.0 * np.maximum(scales, 1e-12))
+    max_ranks = np.searchsorted(method.ordered_d1, thresholds, side="right")
+    max_ranks -= (method.scores_d1 <= thresholds).astype(int)
+    alpha = minimum_alpha_for_rank(max_ranks, n - 1, method.epsilon)
+    q2 = sorted_conformal_quantiles(method.ordered_d2, alpha)
     misses = (true_scores > q2).astype(float)
     alpha_terms = alpha.tolist()
     delta_terms = (misses - alpha).tolist()

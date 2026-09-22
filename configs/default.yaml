@@ -10,10 +10,7 @@ method:
   score: one_minus_probability
   tie_break_epsilon: 1.0e-12
   delta: 0.1
-  alpha_grid:
-    start: 0.01
-    stop: 0.99
-    steps: 99
+  epsilon: 1.0e-10
 
 budget:
   type: constant

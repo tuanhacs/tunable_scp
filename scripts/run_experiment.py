@@ -41,7 +41,7 @@ def main() -> Path:
             config["experiment"]["batches"] = 3
             config["experiment"]["budget_steps"] = 3
             config["experiment"]["budget_ranges"] = {
-                synthetic: ([4, 20] if task == "regression" else [2, 10])
+                synthetic: ([4, 20] if task == "regression" else [14, 20])
             }
             config["experiment"]["match_tscp_C_ranges"] = config["experiment"]["budget_ranges"].copy()
             config["experiment"]["match_coverage_tolerance"] = 1.0
@@ -59,6 +59,8 @@ def main() -> Path:
             config["experiment"]["trials"] = 3
             config["experiment"]["reference_trials"] = 5
             config["data"]["fixed_number_test_samples"] = 1
+            if task == "classification":
+                config["budget"]["value"] = 16.0
 
     kind = config["experiment"]["type"]
     if kind not in COLLECTORS:

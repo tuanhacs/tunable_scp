@@ -50,7 +50,7 @@ def _indices(pool_size: int, total: int, seed: int) -> tuple[np.ndarray, np.ndar
 
 def evaluate_regression(
     split: DataSplit, predictions: RegressionPredictions, method_name: str, total_calibration_size: int,
-    budget_spec: BudgetSpec, delta: float, alpha_grid: np.ndarray, seed: int, number_test: int,
+    budget_spec: BudgetSpec, delta: float, epsilon: float, seed: int, number_test: int,
     estimate_coverage: bool = True,
 ) -> Evaluation:
     d1, d2 = _indices(len(split.y_cal), total_calibration_size, seed)
@@ -64,11 +64,11 @@ def evaluate_regression(
     covered, sizes, alphas = [], [], []
     theory = None
     if method_name == "tscp":
-        method = TsCPRegression(scores[d1], scores[d2], alpha_grid, delta)
+        method = TsCPRegression(scores[d1], scores[d2], epsilon, delta)
         if estimate_coverage:
             theory = estimate_regression_coverage(method, predictions.pred_cal[d1], predictions.scale_cal[d1], split.y_cal[d1], budgets_cal[d1])
     elif method_name == "ecp":
-        method = ECPRegression(scores[np.concatenate([d1, d2])], alpha_grid)
+        method = ECPRegression(scores[np.concatenate([d1, d2])], epsilon)
     else:
         raise ValueError(f"Unknown adaptive method {method_name!r}.")
     for i in range(limit):
@@ -81,7 +81,7 @@ def evaluate_regression(
 
 def evaluate_classification(
     split: DataSplit, predictions: ClassificationPredictions, method_name: str, total_calibration_size: int,
-    budget_spec: BudgetSpec, delta: float, alpha_grid: np.ndarray, seed: int, number_test: int, score_type: str,
+    budget_spec: BudgetSpec, delta: float, epsilon: float, seed: int, number_test: int, score_type: str,
     tie_break_epsilon: float = 0.0, estimate_coverage: bool = True,
 ) -> Evaluation:
     d1, d2 = _indices(len(split.y_cal), total_calibration_size, seed)
@@ -99,11 +99,11 @@ def evaluate_classification(
     covered, sizes, alphas = [], [], []
     theory = None
     if method_name == "tscp":
-        method = TsCPClassification(true_scores[d1], true_scores[d2], alpha_grid, delta)
+        method = TsCPClassification(true_scores[d1], true_scores[d2], epsilon, delta)
         if estimate_coverage:
             theory = estimate_classification_coverage(method, scores_cal[d1], split.y_cal[d1], budgets_cal[d1])
     elif method_name == "ecp":
-        method = ECPClassification(true_scores[np.concatenate([d1, d2])], alpha_grid)
+        method = ECPClassification(true_scores[np.concatenate([d1, d2])], epsilon)
     else:
         raise ValueError(f"Unknown adaptive method {method_name!r}.")
     for i in range(limit):
