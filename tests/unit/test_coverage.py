@@ -103,6 +103,22 @@ def test_ecp_regression_uses_closed_form_not_grid():
     assert interval[1] - interval[0] <= 2.0 + 1e-12
 
 
+def test_ecp_regression_large_budget_is_feasible():
+    method = ECPRegression(np.full(500, 1.0), 1e-10)
+    interval, alpha = method.predict_one(0.0, 7.563318567907845, 500.0)
+    assert 0.0 < alpha < 1.0
+    assert interval[1] - interval[0] <= 500.0
+
+
+def test_ecp_regression_infeasibility_reports_reference_diagnostics():
+    method = ECPRegression(np.full(499, 496.4618698511901 / 499), 1e-10)
+    with pytest.raises(ValueError, match="requires_alpha_above_one") as caught:
+        method.predict_one(0.0, 7.563318567907845, 15.0)
+    message = str(caught.value)
+    for field in ("alpha_required=", "size_at_alpha_max=", "budget=", "scale="):
+        assert field in message
+
+
 def test_ecp_classification_uses_exact_evalue_breakpoint():
     method = ECPClassification(np.array([0.1, 0.1, 0.1]), 1e-10)
     prediction_set, alpha = method.predict_one(np.array([0.2, 0.3, 0.5]), 1.0)

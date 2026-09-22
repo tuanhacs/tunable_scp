@@ -787,10 +787,20 @@ def collect_loo_compare_ecp(config: dict) -> pd.DataFrame:
                             trial_split, trial_fitted, "tscp", size, budget, delta,
                             epsilon, reference_seed, 1, estimate_coverage=False,
                         )
-                        ecp_reference = evaluate_regression(
-                            trial_split, trial_fitted, "ecp", size, budget, delta,
-                            epsilon, reference_seed, 1, estimate_coverage=False,
-                        )
+                        try:
+                            ecp_reference = evaluate_regression(
+                                trial_split, trial_fitted, "ecp", size, budget, delta,
+                                epsilon, reference_seed, 1, estimate_coverage=False,
+                            )
+                        except ValueError as exc:
+                            raise ValueError(
+                                "eCP regression reference failed: "
+                                f"dataset={dataset}, outer_seed={outer_seed}, "
+                                f"total_calibration_size={size}, "
+                                f"reference_trial={reference_trial}, "
+                                f"reference_seed={reference_seed}, "
+                                f"test_index={test_index}. {exc}"
+                            ) from exc
                     else:
                         tscp_reference = evaluate_classification(
                             trial_split, trial_fitted, "tscp", size, budget, delta,
