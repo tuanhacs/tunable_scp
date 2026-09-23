@@ -16,4 +16,4 @@ model:
 method:
   delta: 3.0
 budget:
-  value: 5
+  value: 4
