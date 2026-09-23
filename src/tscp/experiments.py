@@ -1843,6 +1843,10 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
         )
         runtime_stats["runtime_per_test_std"] = runtime_stats["runtime_per_test_std"].fillna(0.0)
         runtime_stats.to_csv(output / "runtime_summary.csv", index=False)
+        runtime_styles = {
+            "scp": ("red", "o", "sCP"),
+            "tscp": ("tab:orange", "s", "TsCP"),
+        }
         for panel_index, (ax, dataset) in enumerate(zip(axes.flat, datasets)):
             show_annotations = panel_index == 3  # first column of the second row
             for method, part in runtime_stats[runtime_stats.dataset == dataset].groupby("method"):
@@ -1850,9 +1854,12 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
                 x = part.calibration_size.to_numpy(dtype=float)
                 mean_seconds = part.runtime_per_test_seconds.to_numpy(dtype=float)
                 std_seconds = part.runtime_per_test_std.to_numpy(dtype=float)
+                color, marker, display_label = runtime_styles.get(
+                    method, (None, "o", str(method)),
+                )
                 line, = ax.plot(
-                    x, mean_seconds, marker="o",
-                    label=method if show_annotations else "_nolegend_",
+                    x, mean_seconds, color=color, marker=marker,
+                    label=display_label if show_annotations else "_nolegend_",
                 )
                 ax.fill_between(
                     x, np.maximum(mean_seconds - std_seconds, np.finfo(float).tiny),
@@ -1863,7 +1870,7 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             ax.set_yscale("log")
             if show_annotations:
                 ax.set_xlabel(r"Total calibration size $2n$")
-                ax.set_ylabel("Inference time per test point (s)")
+                ax.set_ylabel("Runtime per test (s)")
                 ax.legend()
         for ax in axes.flat[len(datasets):]:
             ax.axis("off")
