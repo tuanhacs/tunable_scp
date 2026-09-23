@@ -134,12 +134,12 @@ python scripts/run_suite.py --suite configs/suites/main_paper.yaml --smoke
 | Config | Output |
 |---|---|
 | `self_validation_*.yaml` | Separate `coverage.*`, `size_control_probability.*`, and title-free per-dataset 1x2 figures; `figure.*` aliases coverage |
-| `delta_*.yaml` | Coverage and average size as functions of slack `delta` |
+| `delta_*.yaml` | Coverage and size-control probability as functions of slack `delta` |
 | `compare_ecp_*.yaml` | Coverage-size comparison of TsCP variants and eCP |
 | `hard_constraint*.yaml` | Hard-constraint satisfaction tables |
 | `runtime.yaml` | A 2x3 inference-runtime comparison of sCP and TsCP |
 | `budget_ablation.yaml` | Constant, linear, quadratic, and exponential budgets |
-| `model_ablation_*.yaml` | Coverage and set size vs. total calibration size for multiple models |
+| `model_ablation_*.yaml` | Coverage and size-control probability vs. total calibration size for multiple models |
 | `loo_validation_*.yaml` | Histograms of independent-test coverage and the corrected LOO estimate `1-alpha_hat_LOO-delta_hat_LOO` |
 | `loo_compare_ecp_*.yaml` | LOO-estimator variance tables and estimated-vs-empirical coverage-gap figures |
 

@@ -1664,7 +1664,6 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             size_std = part.hard_accuracy_std.to_numpy(dtype=float)
             mean_line, = size_ax.plot(
                 x_values, size_mean, marker="o",
-                label="Mean over seeds" if col == 0 else "_nolegend_",
             )
             size_ax.fill_between(
                 x_values, np.clip(size_mean - size_std, 0.0, 1.0),
@@ -1675,7 +1674,6 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             
             if col == 0:
                 size_ax.set_ylabel(r"$\Pr\{|C_\delta(X)| \leq S(X)\}$")
-                size_ax.legend(loc="best")
                 size_ax.set_xlabel(r"Slack $\delta$")
     elif kind == "compare_ecp":
         fig, axes = plt.subplots(
