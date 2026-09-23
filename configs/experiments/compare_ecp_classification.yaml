@@ -12,11 +12,11 @@ experiment:
   trials: 4000
   batch_size: 2000
   batches: 200
-  budget_steps: 3
+  budget_steps: 1
   budget_ranges:
-    synthetic_classification: [14, 16]
-    mnist: [3, 5]
-    covertype: [3, 5]
+    synthetic_classification: [14, 14]
+    mnist: [4, 4]
+    covertype: [4, 4]
   match_tscp_C_ranges:
     synthetic_classification: [15, 15]
     mnist: [4, 4]
