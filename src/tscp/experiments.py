@@ -31,6 +31,13 @@ def alpha_epsilon(config: dict) -> float:
     return validate_epsilon(method.get("epsilon", 1e-10))
 
 
+def delta_for_dataset(config: dict, dataset: str) -> float:
+    """Resolve a dataset-specific delta, falling back to method.delta."""
+    method = config.get("method", {})
+    by_dataset = method.get("delta_by_dataset", {})
+    return float(by_dataset.get(dataset, method.get("delta", 0.1)))
+
+
 def budget_for_dataset(config: dict, dataset: str, kind: str | None = None, value: float | None = None) -> BudgetSpec:
     raw = dict(config.get("budget", {}))
     by_dataset = raw.pop("value_by_dataset", {})
@@ -69,7 +76,7 @@ def evaluate(config: dict, dataset: str, seed: int, *, method: str = "tscp", cal
     data_cfg, method_cfg = config.get("data", {}), config.get("method", {})
     calibration_size = int(calibration_size or data_cfg.get("total_calibration_size", 1000))
     number_test = int(number_test or data_cfg.get("fixed_number_test_samples", 1000))
-    delta = float(method_cfg.get("delta", 0.1) if delta is None else delta)
+    delta = delta_for_dataset(config, dataset) if delta is None else float(delta)
     budget = budget or budget_for_dataset(config, dataset)
     epsilon = alpha_epsilon(config)
     if task == "regression":
@@ -113,11 +120,11 @@ def collect_self_validation(config: dict) -> pd.DataFrame:
     fixed_cal = int(config["data"]["total_calibration_size"])
     fixed_test = int(config["data"]["fixed_number_test_samples"])
     epsilon = alpha_epsilon(config)
-    delta = float(method_cfg.get("delta", 0.1))
     score_type = method_cfg.get("score", "one_minus_probability")
     tie_break_epsilon = float(method_cfg.get("tie_break_epsilon", 0.0))
 
     for dataset in config["datasets"]:
+        delta = delta_for_dataset(config, dataset)
         budget = budget_for_dataset(config, dataset)
         for seed in config["seeds"]:
             task, split, fitted = prepare(config, dataset, int(seed))
@@ -210,6 +217,7 @@ def collect_self_validation(config: dict) -> pd.DataFrame:
             for count in test_sizes:
                 count = int(count)
                 rows.append({"panel": "coverage", "dataset": dataset, "seed": seed, "x": count,
+                             "delta": delta,
                              "empirical": float(empirical_covered[:count].mean()),
                              "average_size": float(empirical_sizes[:count].mean()),
                              "empirical_trials": count,
@@ -238,6 +246,7 @@ def collect_self_validation(config: dict) -> pd.DataFrame:
                         float(result_size <= result_budget)
                     )
                 rows.append({"panel": "size", "dataset": dataset, "seed": seed, "x": int(size),
+                             "delta": delta,
                              "empirical": float(np.mean(size_covered)),
                              "average_size": float(np.mean(size_values)),
                              "budget": float(np.mean(size_budgets)),

@@ -7,6 +7,10 @@ experiment:
 datasets: [synthetic_classification, mnist, covertype]
 method:
   delta: 1.0
+  delta_by_dataset:
+    synthetic_classification: 1.0
+    mnist: 1.0
+    covertype: 1.0
 budget:
   value_by_dataset:
     synthetic_classification: 16

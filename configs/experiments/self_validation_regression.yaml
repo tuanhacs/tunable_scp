@@ -10,3 +10,9 @@ budget:
     synthetic_regression: 15.0
     california_housing: 2.0
     superconductivity: 40.0
+method:
+  delta: 0.1
+  delta_by_dataset:
+    synthetic_regression: 1.0
+    california_housing: 0.2
+    superconductivity: 4.0

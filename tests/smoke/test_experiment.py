@@ -67,8 +67,10 @@ def test_self_validation_collector_on_small_synthetic_data(tmp_path):
         "fixed_number_test_samples": 40,
     })
     config["budget"] = {"type": "constant", "value": 10.0}
+    config["method"]["delta_by_dataset"] = {"synthetic_regression": 0.25}
     frame = collect_self_validation(config)
     assert {"coverage", "size"} == set(frame["panel"])
+    assert set(frame["delta"]) == {0.25}
     coverage = frame[frame["panel"] == "coverage"]
     assert coverage["corrected_bound"].notna().all()
     np.testing.assert_array_equal(coverage["empirical_trials"], coverage["x"])
