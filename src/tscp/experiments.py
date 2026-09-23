@@ -730,23 +730,42 @@ def collect_model_ablation(config: dict) -> pd.DataFrame:
                     sizes = []
                     budgets = []
                     covered = []
+                    alphas = []
                     for trial in range(size_trials):
                         run_seed = 6_000_000_000 + int(seed) * 10_000_000 + size * 1_000 + trial
                         result = run_one_random_pair(size, run_seed)
                         sizes.append(float(result.sizes[0]))
                         budgets.append(float(result.budgets[0]))
                         covered.append(float(result.covered[0]))
+                        alphas.append(float(result.alphas[0]))
                     sizes = np.asarray(sizes, dtype=float)
                     budgets = np.asarray(budgets, dtype=float)
+                    alphas = np.asarray(alphas, dtype=float)
+                    half_size = size // 2
+                    alpha_rank_floor = max(epsilon, 1.0 / (half_size + 1.0))
+                    alpha_at_rank_floor = np.isclose(
+                        alphas, alpha_rank_floor, rtol=1e-8, atol=1e-12,
+                    )
                     rows.append({
                         "panel": "size", "dataset": dataset, "model": model,
                         "seed": int(seed), "x": size,
                         "calibration_size": size,
                         "average_size": float(sizes.mean()),
                         "average_size_std": float(sizes.std(ddof=1)) if size_trials > 1 else 0.0,
+                        "set_size_median": float(np.median(sizes)),
+                        "set_size_p90": float(np.quantile(sizes, 0.9)),
                         "budget": float(budgets.mean()),
                         "hard_accuracy": float(np.mean(sizes <= budgets)),
                         "coverage": float(np.mean(covered)),
+                        "alpha_mean": float(alphas.mean()),
+                        "alpha_median": float(np.median(alphas)),
+                        "alpha_min": float(alphas.min()),
+                        "alpha_max": float(alphas.max()),
+                        "alpha_rank_floor": float(alpha_rank_floor),
+                        "alpha_at_rank_floor_rate": float(alpha_at_rank_floor.mean()),
+                        "alpha_at_epsilon_rate": float(np.mean(np.isclose(
+                            alphas, epsilon, rtol=1e-8, atol=1e-12,
+                        ))),
                         "size_trials": size_trials,
                     })
     return pd.DataFrame(rows)
@@ -1784,6 +1803,44 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
     elif kind == "model_ablation":
         fig, axes = plt.subplots(
             2, len(datasets), figsize=_plot_figsize(config, (6 * len(datasets), 8)), squeeze=False,
+        )
+        size_diagnostics_by_seed = frame[frame.panel == "size"].copy()
+        diagnostic_columns = [
+            "dataset", "model", "seed", "calibration_size", "size_trials",
+            "hard_accuracy", "coverage", "average_size", "set_size_median",
+            "set_size_p90", "alpha_mean", "alpha_median", "alpha_min",
+            "alpha_max", "alpha_rank_floor", "alpha_at_rank_floor_rate",
+            "alpha_at_epsilon_rate",
+        ]
+        size_diagnostics_by_seed[diagnostic_columns].sort_values(
+            ["dataset", "model", "seed", "calibration_size"],
+        ).to_csv(output / "model_ablation_size_diagnostics_by_seed.csv", index=False)
+        size_diagnostics = (
+            size_diagnostics_by_seed.groupby(
+                ["dataset", "model", "calibration_size"], as_index=False,
+            )
+            .agg(
+                size_trials_per_seed=("size_trials", "first"),
+                size_control_probability=("hard_accuracy", "mean"),
+                size_control_probability_std=("hard_accuracy", "std"),
+                coverage=("coverage", "mean"),
+                average_size=("average_size", "mean"),
+                set_size_median=("set_size_median", "mean"),
+                set_size_p90=("set_size_p90", "mean"),
+                alpha_mean=("alpha_mean", "mean"),
+                alpha_median=("alpha_median", "mean"),
+                alpha_min=("alpha_min", "min"),
+                alpha_max=("alpha_max", "max"),
+                alpha_rank_floor=("alpha_rank_floor", "first"),
+                alpha_at_rank_floor_rate=("alpha_at_rank_floor_rate", "mean"),
+                alpha_at_epsilon_rate=("alpha_at_epsilon_rate", "mean"),
+            )
+        )
+        size_diagnostics["size_control_probability_std"] = (
+            size_diagnostics["size_control_probability_std"].fillna(0.0)
+        )
+        size_diagnostics.to_csv(
+            output / "model_ablation_size_diagnostics.csv", index=False,
         )
         coverage_avg = _mean(
             frame[frame.panel == "coverage"], ["dataset", "model", "x"],

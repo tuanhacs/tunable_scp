@@ -130,7 +130,7 @@ def test_constraint_compare_ecp_uses_paired_trials(tmp_path):
         assert (tmp_path / name).is_file()
 
 
-def test_model_ablation_uses_independent_mc_theory_without_loo():
+def test_model_ablation_uses_independent_mc_theory_without_loo(tmp_path):
     root = Path(__file__).resolve().parents[2]
     config = load_config(root / "configs" / "experiments" / "model_ablation_regression.yaml")
     config["datasets"] = ["synthetic_regression"]
@@ -155,10 +155,19 @@ def test_model_ablation_uses_independent_mc_theory_without_loo():
     assert set(coverage.empirical_trials) == {2, 3}
     assert set(coverage.reference_trials) == {4}
     assert set(size.size_trials) == {3}
+    assert {
+        "alpha_mean", "alpha_median", "alpha_min", "alpha_max",
+        "alpha_rank_floor", "alpha_at_rank_floor_rate",
+        "alpha_at_epsilon_rate", "set_size_median", "set_size_p90",
+    } <= set(size.columns)
+    assert size["alpha_at_rank_floor_rate"].between(0.0, 1.0).all()
     np.testing.assert_allclose(coverage.corrected_bound, coverage.reference_coverage)
     np.testing.assert_allclose(
         coverage.corrected_bound, 1.0 - coverage.expected_alpha - coverage.expected_delta,
     )
+    make_figures(frame, config, tmp_path)
+    assert (tmp_path / "model_ablation_size_diagnostics_by_seed.csv").is_file()
+    assert (tmp_path / "model_ablation_size_diagnostics.csv").is_file()
 
 
 def test_loo_comparison_uses_one_random_test_point_per_trial():
