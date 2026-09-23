@@ -15,6 +15,6 @@ model:
     dnn: { hidden_layer_sizes: [32, 16], max_iter: 300 }
 method:
   delta: 3.0
-  epsilon: 0.001
+  epsilon: 0.005
 budget:
   value: 4

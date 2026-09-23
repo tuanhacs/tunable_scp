@@ -5,7 +5,11 @@ experiment:
   type: hard_constraint
 datasets: [synthetic_classification, mnist, covertype]
 method:
-  delta: 1.1
+  delta: 1.0
+  delta_by_dataset:
+    synthetic_classification: 2.0
+    mnist: 2.0
+    covertype: 1.0
 budget:
   value_by_dataset:
     synthetic_classification: 16
