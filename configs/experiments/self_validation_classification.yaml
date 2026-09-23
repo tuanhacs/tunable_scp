@@ -8,13 +8,13 @@ datasets: [synthetic_classification, mnist, covertype]
 method:
   delta: 1.0
   delta_by_dataset:
-    synthetic_classification: 1.0
+    synthetic_classification: 2.0
     mnist: 1.0
     covertype: 1.0
 budget:
   value_by_dataset:
     synthetic_classification: 16
-    mnist: 4
+    mnist: 5
     covertype: 4
 data:
   total_calibration_size: 1000
