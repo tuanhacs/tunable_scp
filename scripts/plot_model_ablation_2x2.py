@@ -43,7 +43,7 @@ def _load_run(value: str) -> pd.DataFrame:
     frame = pd.read_csv(metrics)
     required = {
         "panel", "x", "dataset", "model", "seed", "coverage",
-        "corrected_bound", "average_size", "budget",
+        "corrected_bound", "hard_accuracy",
     }
     missing = required - set(frame.columns)
     if missing:
@@ -129,8 +129,7 @@ def main() -> Path:
     size_summary = selected[selected.panel == "size"].groupby(
         ["task", "dataset", "model", "panel", "x"], as_index=False,
     ).agg(
-        average_size=("average_size", "mean"),
-        prechosen_size=("budget", "mean"),
+        size_control_probability=("hard_accuracy", "mean"),
         outer_seeds=("seed", "nunique"),
     )
     summary = pd.concat([coverage_summary, size_summary], ignore_index=True, sort=False)
@@ -161,20 +160,16 @@ def main() -> Path:
             )
             model_size = size_part[size_part.model == model].sort_values("x")
             axes[1, col].plot(
-                model_size.x, model_size.average_size,
+                model_size.x, model_size.size_control_probability,
                 color=color, marker="o", label=MODEL_LABELS.get(str(model), str(model)),
             )
-        budget_curve = size_part.groupby("x", as_index=False).prechosen_size.mean()
-        axes[1, col].plot(
-            budget_curve.x, budget_curve.prechosen_size,
-            color="black", linestyle="--", label="Pre-chosen set size",
-        )
         axes[0, col].set_title(_dataset_display_name(dataset).replace("CaliforniaHousing", "California Housing"))
         axes[0, col].set_xlabel("Number of test samples")
         axes[1, col].set_xlabel(r"Total calibration size $2n$")
         if col == 0:
             axes[0, col].set_ylabel("Coverage")
-            axes[1, col].set_ylabel("Average set size")
+            axes[1, col].set_ylabel(r"$\Pr\{|C_\delta(X)| \leq S(X)\}$")
+        axes[1, col].set_ylim(0.0, 1.0)
         for ax in axes[:, col]:
             ax.grid(alpha=0.25)
             ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -196,7 +191,7 @@ def main() -> Path:
         Line2D([], [], color="black", linestyle="-", label="Empirical"),
         Line2D([], [], color="black", linestyle="--", label="Theoretical"),
     ]
-    bottom_handles = [Line2D([], [], color="black", linestyle="--", label="Pre-chosen set size")] + model_handles
+    bottom_handles = model_handles
     axes[0, 1].legend(handles=top_handles, loc="center left", bbox_to_anchor=(1.04, 0.5), frameon=False)
     axes[1, 1].legend(handles=bottom_handles, loc="center left", bbox_to_anchor=(1.04, 0.5), frameon=False)
 

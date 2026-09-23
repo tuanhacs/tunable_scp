@@ -313,6 +313,15 @@ def collect_compare(config: dict) -> pd.DataFrame:
     epsilon = alpha_epsilon(config)
     tie_epsilon = float(method_config.get("tie_break_epsilon", 0.0))
 
+    def compare_delta(variant: dict, dataset: str) -> float:
+        """Resolve variant-specific delta, then fall back to the method config."""
+        variant_by_dataset = variant.get("delta_by_dataset", {})
+        if dataset in variant_by_dataset:
+            return float(variant_by_dataset[dataset])
+        if "delta" in variant:
+            return float(variant["delta"])
+        return delta_for_dataset(config, dataset)
+
     def budget_values(dataset: str, task: str) -> np.ndarray:
         ranges = experiment.get("budget_ranges", {})
         if dataset in ranges:
@@ -383,7 +392,7 @@ def collect_compare(config: dict) -> pd.DataFrame:
                 for variant in variants:
                     variant_name = str(variant["name"])
                     method_name = str(variant["method"]).lower()
-                    delta = float(variant.get("delta", method_config.get("delta", 0.1)))
+                    delta = compare_delta(variant, dataset)
 
                     if task == "regression":
                         if method_name == "tscp":
@@ -469,6 +478,10 @@ def collect_compare(config: dict) -> pd.DataFrame:
                             "average_budget": float(batch_budgets.mean()),
                             "variant": variant_name,
                             "method": str(variant["method"]).lower(),
+                            "delta": (
+                                compare_delta(variant, dataset)
+                                if str(variant["method"]).lower() == "tscp" else np.nan
+                            ),
                             "base_trials": trials,
                             "batch_size": batch_size,
                             "coverage": float(batch_covered.mean()),
@@ -1594,12 +1607,11 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             .agg(
                 coverage=("coverage", "mean"),
                 corrected_bound=("corrected_bound", "mean"),
-                average_size=("average_size", "mean"),
-                average_size_std=("average_size", "std"),
-                budget=("budget", "mean"),
+                hard_accuracy=("hard_accuracy", "mean"),
+                hard_accuracy_std=("hard_accuracy", "std"),
             )
         )
-        stats["average_size_std"] = stats["average_size_std"].fillna(0.0)
+        stats["hard_accuracy_std"] = stats["hard_accuracy_std"].fillna(0.0)
 
         for col, dataset in enumerate(datasets):
             coverage_ax = axes[0, col]
@@ -1624,24 +1636,21 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
                 coverage_ax.legend(loc="best")
                 coverage_ax.set_xlabel(r"Slack $\delta$")
 
-            size_mean = part.average_size.to_numpy(dtype=float)
-            size_std = part.average_size_std.to_numpy(dtype=float)
+            size_mean = part.hard_accuracy.to_numpy(dtype=float)
+            size_std = part.hard_accuracy_std.to_numpy(dtype=float)
             mean_line, = size_ax.plot(
                 x_values, size_mean, marker="o",
                 label="Mean over seeds" if col == 0 else "_nolegend_",
             )
             size_ax.fill_between(
-                x_values, size_mean - size_std, size_mean + size_std,
+                x_values, np.clip(size_mean - size_std, 0.0, 1.0),
+                np.clip(size_mean + size_std, 0.0, 1.0),
                 color=mean_line.get_color(), alpha=0.2,
             )
-            size_ax.plot(
-                x_values, part.budget.to_numpy(dtype=float), linestyle=":",
-                color=mean_line.get_color(),
-                label="Pre-chosen set size" if col == 0 else "_nolegend_",
-            )
+            size_ax.set_ylim(0.0, 1.0)
             
             if col == 0:
-                size_ax.set_ylabel("Average set size")
+                size_ax.set_ylabel(r"$\Pr\{|C_\delta(X)| \leq S(X)\}$")
                 size_ax.legend(loc="best")
                 size_ax.set_xlabel(r"Slack $\delta$")
     elif kind == "compare_ecp":
@@ -1756,7 +1765,7 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
         )
         size_avg = _mean(
             frame[frame.panel == "size"], ["dataset", "model", "x"],
-            ["average_size", "budget"],
+            ["hard_accuracy"],
         )
         for col, dataset in enumerate(datasets):
             dataset_coverage = coverage_avg[coverage_avg.dataset == dataset]
@@ -1772,16 +1781,15 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
                 )
                 size_part = dataset_size[dataset_size.model == model].sort_values("x")
                 axes[1, col].plot(
-                    size_part.x, size_part.average_size, marker="o",
+                    size_part.x, size_part.hard_accuracy, marker="o",
                     color=empirical_line.get_color(), label=model,
                 )
-            budget_curve = dataset_size.groupby("x", as_index=False).budget.mean()
-            axes[1, col].plot(
-                budget_curve.x, budget_curve.budget, color="black", linestyle=":",
-                label="Pre-chosen set size",
-            )
             axes[0, col].set(title=_dataset_display_name(dataset), xlabel="Number of test samples", ylabel="Coverage")
-            axes[1, col].set(xlabel=r"Total calibration size $2n$", ylabel="Average prediction-set size")
+            axes[1, col].set(
+                xlabel=r"Total calibration size $2n$",
+                ylabel=r"$\Pr\{|C_\delta(X)| \leq S(X)\}$",
+                ylim=(0.0, 1.0),
+            )
             axes[0, col]._tscp_plot_scope = "coverage"
             axes[1, col]._tscp_plot_scope = "size"
             axes[0, col].grid(alpha=0.25)
