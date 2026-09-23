@@ -14,7 +14,7 @@ experiment:
   batches: 200
   budget_steps: 1
   budget_ranges:
-    synthetic_classification: [14, 14]
+    synthetic_classification: [15, 15]
     mnist: [4, 4]
     covertype: [4, 4]
   match_tscp_C_ranges:
