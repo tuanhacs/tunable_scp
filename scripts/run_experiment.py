@@ -57,6 +57,11 @@ def main() -> Path:
             config["experiment"]["reference_trials"] = 5
         if config.get("experiment", {}).get("type") == "constraint_compare_ecp":
             config["experiment"]["trials"] = 5
+        if config.get("experiment", {}).get("type") == "runtime":
+            config["data"]["fixed_number_test_samples"] = 50
+            config["data"]["total_calibration_sizes_by_task"] = {
+                "regression": [60, 100], "classification": [60, 100],
+            }
         if config.get("experiment", {}).get("type") == "loo_compare_ecp":
             config["experiment"]["trials"] = 3
             config["experiment"]["reference_trials"] = 5

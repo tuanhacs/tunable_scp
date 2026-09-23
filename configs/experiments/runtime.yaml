@@ -4,6 +4,7 @@ experiment:
   name: runtime
   type: runtime
   methods: [scp, tscp]
+  fixed_alpha: 0.1
 datasets: [synthetic_regression, california_housing, superconductivity, synthetic_classification, mnist, covertype]
 budget:
   value_by_dataset:
@@ -14,5 +15,8 @@ budget:
     mnist: 4
     covertype: 4
 data:
-  number_test_samples: [100, 250, 500, 1000, 2000]
+  fixed_number_test_samples: 1000
+  total_calibration_sizes_by_task:
+    classification: [200, 500, 1000, 2000]
+    regression: [200, 500, 1000, 2000, 3000, 4000]
 

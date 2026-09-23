@@ -24,6 +24,6 @@ experiment:
   match_coverage_tolerance: 0.005
   variants:
     - { name: "TsCP", method: tscp, score: one_minus_probability }
-    - { name: "eCP", method: ecp, score: negative_log_probability }
+    - { name: "eCP", method: ecp, score: one_minus_probability }
 seeds: [0]
 datasets: [synthetic_classification, mnist, covertype]

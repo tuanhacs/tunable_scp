@@ -1014,50 +1014,83 @@ def collect_loo_compare_ecp(config: dict) -> pd.DataFrame:
 
 
 def collect_runtime(config: dict) -> pd.DataFrame:
-    """Time only conformal inference; fitting and score construction are outside the clock."""
+    """Time conformal inference per test point while varying calibration size."""
     rows = []
-    methods = config["experiment"].get("methods", ["scp", "tscp"])
+    experiment = config.get("experiment", {})
+    data_cfg = config.get("data", {})
+    methods = experiment.get("methods", ["scp", "tscp"])
+    unsupported = set(methods) - {"scp", "tscp"}
+    if unsupported:
+        raise ValueError(f"runtime supports only scp and tscp; got {sorted(unsupported)}")
+    requested_test_count = int(data_cfg.get("fixed_number_test_samples", 1000))
+    if requested_test_count < 1:
+        raise ValueError("runtime requires a positive fixed_number_test_samples.")
+    sizes_by_task = data_cfg.get("total_calibration_sizes_by_task", {})
     for dataset in config["datasets"]:
         for seed in config["seeds"]:
             task, split, fitted = prepare(config, dataset, seed)
-            total = int(config["data"].get("total_calibration_size", 2000))
-            idx = np.random.default_rng(seed + 1000).choice(len(split.y_cal), total, replace=False)
-            d1, d2 = idx[: total // 2], idx[total // 2 :]
+            calibration_sizes = sizes_by_task.get(task, data_cfg.get("total_calibration_sizes", []))
+            calibration_sizes = [int(value) for value in calibration_sizes]
+            if not calibration_sizes:
+                raise ValueError(f"runtime has no calibration sizes configured for task {task!r}.")
+            if any(size <= 0 or size % 2 for size in calibration_sizes):
+                raise ValueError("runtime calibration sizes must be positive and even.")
+            if max(calibration_sizes) > len(split.y_cal):
+                raise ValueError("runtime calibration size exceeds the available calibration pool.")
+            # Nested calibration subsets reduce irrelevant sampling variation
+            # when studying runtime as a function of calibration size.
+            calibration_order = np.random.default_rng(seed + 1000).choice(
+                len(split.y_cal), max(calibration_sizes), replace=False,
+            )
             epsilon = alpha_epsilon(config)
-            fixed_alpha = float(config["experiment"].get("fixed_alpha", 0.1))
-            delta = float(config["method"].get("delta", 0.1))
+            fixed_alpha = float(experiment.get("fixed_alpha", 0.1))
+            delta = delta_for_dataset(config, dataset)
             spec = budget_for_dataset(config, dataset)
+            count = min(requested_test_count, len(split.y_test))
             if task == "regression":
                 scores = np.abs(split.y_cal - fitted.pred_cal) / np.maximum(fitted.scale_cal, 1e-12)
-                q_scp = conformal_quantile(scores[idx], fixed_alpha)
-                tscp = TsCPRegression(scores[d1], scores[d2], epsilon, delta)
-                ecp_tpss = ECPRegression(scores[idx], epsilon)
-                denom = fixed_alpha * (len(idx) + 1) - 1.0
-                ecp_fixed_radius_score = float("inf") if denom <= 0 else scores[idx].sum() / denom
                 test_budgets = evaluate_budget(spec, normalized_uncertainty(fitted.scale_test, fitted.scale_reference))
             else:
                 score_type = config["method"].get("score", "one_minus_probability")
                 cal_scores = classification_scores(fitted.probs_cal, score_type)
                 test_scores = classification_scores(fitted.probs_test, score_type)
                 true_scores = cal_scores[np.arange(len(split.y_cal)), split.y_cal.astype(int)]
-                q_scp = conformal_quantile(true_scores[idx], fixed_alpha)
-                tscp = TsCPClassification(true_scores[d1], true_scores[d2], epsilon, delta)
-                ecp_tpss = ECPClassification(true_scores[idx], epsilon)
-                test_budgets = evaluate_budget(spec, classification_uncertainty(fitted.probs_test), classification=True)
-            for count in config["data"]["number_test_samples"]:
-                count = min(int(count), len(split.y_test))
+                uncertainty_kind = "entropy" if spec.uncertainty == "auto" else spec.uncertainty
+                test_budgets = evaluate_budget(
+                    spec, classification_uncertainty(fitted.probs_test, uncertainty_kind),
+                    classification=True,
+                )
+            for total in calibration_sizes:
+                idx = calibration_order[:total]
+                d1, d2 = idx[: total // 2], idx[total // 2 :]
+                if task == "regression":
+                    q_scp = conformal_quantile(scores[idx], fixed_alpha)
+                    tscp = TsCPRegression(scores[d1], scores[d2], epsilon, delta)
+                else:
+                    q_scp = conformal_quantile(true_scores[idx], fixed_alpha)
+                    tscp = TsCPClassification(true_scores[d1], true_scores[d2], epsilon, delta)
                 for label in methods:
+                    # One untimed call removes first-call effects from the
+                    # measurement while leaving all preprocessing outside it.
+                    if task == "regression":
+                        if label == "scp":
+                            warm_radius = fitted.scale_test[0] * q_scp
+                            _ = (fitted.pred_test[0] - warm_radius, fitted.pred_test[0] + warm_radius)
+                        else:
+                            tscp.predict_one(fitted.pred_test[0], fitted.scale_test[0], test_budgets[0])
+                    else:
+                        if label == "scp":
+                            _ = test_scores[0] <= q_scp
+                        else:
+                            tscp.predict_one(test_scores[0], test_budgets[0])
                     start = time.perf_counter()
                     for i in range(count):
                         if task == "regression":
                             if label == "scp":
-                                _ = 2.0 * fitted.scale_test[i] * q_scp
+                                radius = fitted.scale_test[i] * q_scp
+                                _ = (fitted.pred_test[i] - radius, fitted.pred_test[i] + radius)
                             elif label == "tscp":
                                 tscp.predict_one(fitted.pred_test[i], fitted.scale_test[i], test_budgets[i])
-                            elif label == "ecp":
-                                _ = 2.0 * fitted.scale_test[i] * ecp_fixed_radius_score
-                            elif label == "ecp_tpss":
-                                ecp_tpss.predict_one(fitted.pred_test[i], fitted.scale_test[i], test_budgets[i])
                             else:
                                 raise ValueError(f"Unknown runtime method {label!r}.")
                         else:
@@ -1065,16 +1098,15 @@ def collect_runtime(config: dict) -> pd.DataFrame:
                                 _ = test_scores[i] <= q_scp
                             elif label == "tscp":
                                 tscp.predict_one(test_scores[i], test_budgets[i])
-                            elif label == "ecp":
-                                denominator = (true_scores[idx].sum() + test_scores[i]) / (len(idx) + 1)
-                                _ = test_scores[i] / np.maximum(denominator, 1e-12) < 1.0 / fixed_alpha
-                            elif label == "ecp_tpss":
-                                ecp_tpss.predict_one(test_scores[i], test_budgets[i])
                             else:
                                 raise ValueError(f"Unknown runtime method {label!r}.")
                     elapsed = time.perf_counter() - start
-                    rows.append({"dataset": dataset, "seed": seed, "number_test": count,
-                                 "method": label, "runtime_seconds": elapsed})
+                    rows.append({
+                        "dataset": dataset, "seed": seed,
+                        "calibration_size": total, "number_test": count,
+                        "method": label, "runtime_seconds": elapsed,
+                        "runtime_per_test_seconds": elapsed / count,
+                    })
     return pd.DataFrame(rows)
 
 
@@ -1803,11 +1835,30 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             )
     elif kind == "runtime":
         fig, axes = plt.subplots(2, 3, figsize=_plot_figsize(config, (15, 8)), squeeze=False)
-        avg = _mean(frame, ["dataset", "method", "number_test"], ["runtime_seconds"])
+        runtime_stats = frame.groupby(
+            ["dataset", "method", "calibration_size"], as_index=False,
+        ).agg(
+            runtime_per_test_seconds=("runtime_per_test_seconds", "mean"),
+            runtime_per_test_std=("runtime_per_test_seconds", "std"),
+        )
+        runtime_stats["runtime_per_test_std"] = runtime_stats["runtime_per_test_std"].fillna(0.0)
+        runtime_stats.to_csv(output / "runtime_summary.csv", index=False)
         for ax, dataset in zip(axes.flat, datasets):
-            for method, part in avg[avg.dataset == dataset].groupby("method"):
-                ax.plot(part.number_test, part.runtime_seconds, marker="o", label=method)
-            ax.set(title=_dataset_display_name(dataset), xlabel="Number of test samples", ylabel="Runtime (seconds)")
+            for method, part in runtime_stats[runtime_stats.dataset == dataset].groupby("method"):
+                part = part.sort_values("calibration_size")
+                x = part.calibration_size.to_numpy(dtype=float)
+                mean_ms = 1000.0 * part.runtime_per_test_seconds.to_numpy(dtype=float)
+                std_ms = 1000.0 * part.runtime_per_test_std.to_numpy(dtype=float)
+                line, = ax.plot(x, mean_ms, marker="o", label=method)
+                ax.fill_between(
+                    x, np.maximum(mean_ms - std_ms, 0.0), mean_ms + std_ms,
+                    color=line.get_color(), alpha=0.2,
+                )
+            ax.set(
+                title=_dataset_display_name(dataset),
+                xlabel=r"Total calibration size $2n$",
+                ylabel="Inference time per test point (ms)",
+            )
         for ax in axes.flat[len(datasets):]:
             ax.axis("off")
     elif kind == "loo_validation":
