@@ -8,9 +8,9 @@ experiment:
   batches: 200
   budget_steps: 1
   budget_ranges:
-    synthetic_regression: [14.0, 14.0]
-    california_housing: [3.0, 3.0]
-    superconductivity: [35.0, 35.0]
+    synthetic_regression: [15.0, 15.0]
+    california_housing: [2.0, 2.0]
+    superconductivity: [40.0, 40.0]
   match_coverage_tolerance: 0.004
   variants:
     - { name: "TsCP", method: tscp, delta: 0.001 }
