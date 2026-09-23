@@ -1843,22 +1843,28 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
         )
         runtime_stats["runtime_per_test_std"] = runtime_stats["runtime_per_test_std"].fillna(0.0)
         runtime_stats.to_csv(output / "runtime_summary.csv", index=False)
-        for ax, dataset in zip(axes.flat, datasets):
+        for panel_index, (ax, dataset) in enumerate(zip(axes.flat, datasets)):
+            show_annotations = panel_index == 3  # first column of the second row
             for method, part in runtime_stats[runtime_stats.dataset == dataset].groupby("method"):
                 part = part.sort_values("calibration_size")
                 x = part.calibration_size.to_numpy(dtype=float)
-                mean_ms = 1000.0 * part.runtime_per_test_seconds.to_numpy(dtype=float)
-                std_ms = 1000.0 * part.runtime_per_test_std.to_numpy(dtype=float)
-                line, = ax.plot(x, mean_ms, marker="o", label=method)
+                mean_seconds = part.runtime_per_test_seconds.to_numpy(dtype=float)
+                std_seconds = part.runtime_per_test_std.to_numpy(dtype=float)
+                line, = ax.plot(
+                    x, mean_seconds, marker="o",
+                    label=method if show_annotations else "_nolegend_",
+                )
                 ax.fill_between(
-                    x, np.maximum(mean_ms - std_ms, 0.0), mean_ms + std_ms,
+                    x, np.maximum(mean_seconds - std_seconds, np.finfo(float).tiny),
+                    mean_seconds + std_seconds,
                     color=line.get_color(), alpha=0.2,
                 )
-            ax.set(
-                title=_dataset_display_name(dataset),
-                xlabel=r"Total calibration size $2n$",
-                ylabel="Inference time per test point (ms)",
-            )
+            ax.set_title(_dataset_display_name(dataset))
+            ax.set_yscale("log")
+            if show_annotations:
+                ax.set_xlabel(r"Total calibration size $2n$")
+                ax.set_ylabel("Inference time per test point (s)")
+                ax.legend()
         for ax in axes.flat[len(datasets):]:
             ax.axis("off")
     elif kind == "loo_validation":
