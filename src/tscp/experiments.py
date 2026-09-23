@@ -495,6 +495,92 @@ def collect_hard_constraint(config: dict) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def collect_constraint_compare_ecp(config: dict) -> pd.DataFrame:
+    """Paired Monte Carlo comparison of eCP/TsCP size-constraint control."""
+    rows = []
+    experiment = config.get("experiment", {})
+    data_cfg = config.get("data", {})
+    method_cfg = config.get("method", {})
+    trials = int(experiment.get("trials", data_cfg.get("fixed_number_test_samples", 1000)))
+    tolerance = float(experiment.get("constraint_tolerance", 1e-10))
+    if trials < 1:
+        raise ValueError("constraint_compare_ecp requires at least one trial.")
+    if tolerance < 0:
+        raise ValueError("experiment.constraint_tolerance must be nonnegative.")
+    epsilon = alpha_epsilon(config)
+    score_type = method_cfg.get("score", "one_minus_probability")
+    tie_epsilon = float(method_cfg.get("tie_break_epsilon", 0.0))
+
+    for dataset in config["datasets"]:
+        budget = budget_for_dataset(config, dataset)
+        delta = delta_for_dataset(config, dataset)
+        for seed in config["seeds"]:
+            task, split, fitted = prepare(config, dataset, int(seed))
+
+            def one_test_view(test_index: int):
+                trial_split = replace(
+                    split, x_test=split.x_test[[test_index]], y_test=split.y_test[[test_index]],
+                )
+                if task == "regression":
+                    trial_fitted = replace(
+                        fitted, pred_test=fitted.pred_test[[test_index]],
+                        scale_test=fitted.scale_test[[test_index]],
+                    )
+                else:
+                    trial_fitted = replace(fitted, probs_test=fitted.probs_test[[test_index]])
+                return trial_split, trial_fitted
+
+            for calibration_size in data_cfg["total_calibration_sizes"]:
+                calibration_size = int(calibration_size)
+                for trial in range(trials):
+                    run_seed = (
+                        6_000_000_000 + int(seed) * 10_000_000
+                        + calibration_size * 1_000 + trial
+                    )
+                    pair_rng = np.random.default_rng(run_seed)
+                    pair_rng.choice(len(split.y_cal), calibration_size, replace=False)
+                    test_index = int(pair_rng.integers(0, len(split.y_test)))
+                    trial_split, trial_fitted = one_test_view(test_index)
+
+                    results = {}
+                    for method_name in ("ecp", "tscp"):
+                        if task == "regression":
+                            results[method_name] = evaluate_regression(
+                                trial_split, trial_fitted, method_name, calibration_size,
+                                budget, delta, epsilon, run_seed, 1,
+                                estimate_coverage=False,
+                            )
+                        else:
+                            results[method_name] = evaluate_classification(
+                                trial_split, trial_fitted, method_name, calibration_size,
+                                budget, delta, epsilon, run_seed, 1, score_type,
+                                tie_epsilon, estimate_coverage=False,
+                            )
+
+                    for method_name, result in results.items():
+                        set_size = float(result.sizes[0])
+                        budget_value = float(result.budgets[0])
+                        numerical_margin = tolerance * max(1.0, abs(budget_value))
+                        satisfies = set_size <= budget_value + numerical_margin
+                        rows.append({
+                            "dataset": dataset,
+                            "seed": int(seed),
+                            "trial": trial,
+                            "test_index": test_index,
+                            "calibration_size": calibration_size,
+                            "method": "eCP" if method_name == "ecp" else "TsCP",
+                            "delta": delta,
+                            "set_size": set_size,
+                            "budget": budget_value,
+                            "constraint_satisfied": float(satisfies),
+                            "constraint_violated": float(not satisfies),
+                            "excess_size": max(0.0, set_size - budget_value),
+                            "alpha": float(result.alphas[0]),
+                            "constraint_tolerance": tolerance,
+                        })
+    return pd.DataFrame(rows)
+
+
 def collect_budget_ablation(config: dict) -> pd.DataFrame:
     rows = []
     for dataset in config["datasets"]:
@@ -980,6 +1066,7 @@ COLLECTORS = {
     "delta_ablation": collect_delta_ablation,
     "compare_ecp": collect_compare,
     "hard_constraint": collect_hard_constraint,
+    "constraint_compare_ecp": collect_constraint_compare_ecp,
     "budget_ablation": collect_budget_ablation,
     "model_ablation": collect_model_ablation,
     "loo_validation": collect_loo_validation,
@@ -1324,9 +1411,67 @@ def summarize_coverage_matched_compare(frame: pd.DataFrame, config: dict) -> pd.
     return summary
 
 
+def summarize_constraint_compare(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Aggregate paired size-control indicators within and across seeds."""
+    groups = ["dataset", "method", "calibration_size", "seed"]
+    per_seed = frame.groupby(groups, as_index=False).agg(
+        trials=("trial", "nunique"),
+        constraint_probability=("constraint_satisfied", "mean"),
+        violations=("constraint_violated", "sum"),
+        average_excess_size=("excess_size", "mean"),
+    )
+    summary = per_seed.groupby(
+        ["dataset", "method", "calibration_size"], as_index=False,
+    ).agg(
+        seeds=("seed", "nunique"),
+        trials_per_seed=("trials", "first"),
+        constraint_probability_mean=("constraint_probability", "mean"),
+        constraint_probability_std=("constraint_probability", "std"),
+        violations=("violations", "sum"),
+        average_excess_size=("average_excess_size", "mean"),
+    )
+    summary["constraint_probability_std"] = summary["constraint_probability_std"].fillna(0.0)
+    summary["total_trials"] = summary["seeds"] * summary["trials_per_seed"]
+    summary["violation_probability"] = 1.0 - summary["constraint_probability_mean"]
+    return per_seed, summary
+
+
 def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
     kind = config["experiment"]["type"]
     datasets = config["datasets"]
+    if kind == "constraint_compare_ecp":
+        per_seed, summary = summarize_constraint_compare(frame)
+        per_seed.to_csv(output / "constraint_probability_by_seed.csv", index=False)
+        summary.to_csv(output / "constraint_probability_summary.csv", index=False)
+        fig, axes = plt.subplots(
+            1, len(datasets), figsize=_plot_figsize(config, (5.2 * len(datasets), 4.2)),
+            squeeze=False, sharey=True,
+        )
+        styles = {"eCP": ("tab:blue", "o"), "TsCP": ("tab:orange", "s")}
+        for col, dataset in enumerate(datasets):
+            ax = axes[0, col]
+            for method_name in ("eCP", "TsCP"):
+                part = summary[
+                    (summary.dataset == dataset) & (summary.method == method_name)
+                ].sort_values("calibration_size")
+                x = part.calibration_size.to_numpy(dtype=float)
+                mean = part.constraint_probability_mean.to_numpy(dtype=float)
+                std = part.constraint_probability_std.to_numpy(dtype=float)
+                color, marker = styles[method_name]
+                ax.plot(x, mean, color=color, marker=marker, label=method_name)
+                ax.fill_between(
+                    x, np.clip(mean - std, 0.0, 1.0), np.clip(mean + std, 0.0, 1.0),
+                    color=color, alpha=0.2,
+                )
+            ax.set_title(_dataset_display_name(dataset))
+            ax.set_xlabel(r"Total calibration size $2n$")
+            ax.set_ylim(0.0, 1.0)
+            if col == 0:
+                ax.set_ylabel(r"$\Pr\{|C(X)| \leq c\}$")
+                ax.legend()
+            ax.grid(alpha=0.25)
+        _save_figure(fig, output, ("constraint_probability", "figure"), config)
+        return
     if kind == "self_validation":
         cov = _mean(frame[frame.panel == "coverage"], ["dataset", "x"], ["empirical", "corrected_bound", "old_proxy"])
         size_stats = (

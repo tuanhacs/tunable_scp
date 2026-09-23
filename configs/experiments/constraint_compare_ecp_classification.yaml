@@ -1,0 +1,22 @@
+defaults: [../default.yaml]
+task: classification
+experiment:
+  name: constraint_compare_ecp_classification
+  type: constraint_compare_ecp
+  trials: 1000
+  # Relative numerical tolerance used only when checking size <= budget.
+  constraint_tolerance: 1.0e-10
+datasets: [synthetic_classification, mnist, covertype]
+method:
+  delta: 1.0
+  delta_by_dataset:
+    synthetic_classification: 2.0
+    mnist: 1.0
+    covertype: 1.0
+budget:
+  value_by_dataset:
+    synthetic_classification: 16
+    mnist: 5
+    covertype: 4
+data:
+  total_calibration_sizes: [500, 1000, 2000, 4000, 6000]

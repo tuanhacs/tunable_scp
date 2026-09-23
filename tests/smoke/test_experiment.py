@@ -5,6 +5,7 @@ import numpy as np
 
 from tscp.experiments import (
     collect_compare,
+    collect_constraint_compare_ecp,
     collect_loo_compare_ecp,
     collect_model_ablation,
     collect_self_validation,
@@ -12,6 +13,7 @@ from tscp.experiments import (
     loo_coverage_report_table,
     make_figures,
     summarize_coverage_matched_compare,
+    summarize_constraint_compare,
     summarize_loo_compare,
 )
 
@@ -91,6 +93,33 @@ def test_self_validation_collector_on_small_synthetic_data(tmp_path):
         "coverage.pdf", "coverage.png",
         "size_control_probability.pdf", "size_control_probability.png",
         "figure.pdf", "figure.png", "SyntheticRegression.pdf", "SyntheticRegression.png",
+    ):
+        assert (tmp_path / name).is_file()
+
+
+def test_constraint_compare_ecp_uses_paired_trials(tmp_path):
+    root = Path(__file__).resolve().parents[2]
+    config = load_config(root / "configs" / "experiments" / "constraint_compare_ecp_regression.yaml")
+    config["datasets"] = ["synthetic_regression"]
+    config["seeds"] = [0]
+    config["model"] = {"mean": "ridge", "scale": "ridge"}
+    config["experiment"]["trials"] = 4
+    config["data"].update({"max_samples": 800, "total_calibration_sizes": [60, 80]})
+    config["budget"] = {"type": "constant", "value": 10.0}
+
+    frame = collect_constraint_compare_ecp(config)
+    assert set(frame["method"]) == {"eCP", "TsCP"}
+    assert frame.groupby(["seed", "calibration_size", "trial"])["test_index"].nunique().eq(1).all()
+    assert frame["constraint_satisfied"].between(0.0, 1.0).all()
+    per_seed, summary = summarize_constraint_compare(frame)
+    assert len(per_seed) == 4
+    assert len(summary) == 4
+    assert summary["constraint_probability_mean"].between(0.0, 1.0).all()
+    make_figures(frame, config, tmp_path)
+    for name in (
+        "constraint_probability.pdf", "constraint_probability.png",
+        "figure.pdf", "figure.png", "constraint_probability_by_seed.csv",
+        "constraint_probability_summary.csv",
     ):
         assert (tmp_path / name).is_file()
 
