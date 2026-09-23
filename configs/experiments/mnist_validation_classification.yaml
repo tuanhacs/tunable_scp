@@ -1,0 +1,11 @@
+defaults: [self_validation_classification.yaml]
+experiment:
+  name: mnist_validation
+  type: self_validation
+method:
+  delta_by_dataset:
+    mnist: 2.0
+budget:
+  value_by_dataset:
+    mnist: 4
+datasets: [mnist]
