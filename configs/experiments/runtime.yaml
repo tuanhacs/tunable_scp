@@ -3,7 +3,7 @@ task: regression
 experiment:
   name: runtime
   type: runtime
-  methods: [scp, tscp, ecp, ecp_tpss]
+  methods: [scp, tscp]
 datasets: [synthetic_regression, california_housing, superconductivity, synthetic_classification, mnist, covertype]
 budget:
   value_by_dataset:

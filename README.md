@@ -137,7 +137,7 @@ python scripts/run_suite.py --suite configs/suites/main_paper.yaml --smoke
 | `delta_*.yaml` | Coverage and average size as functions of slack `delta` |
 | `compare_ecp_*.yaml` | Coverage-size comparison of TsCP variants and eCP |
 | `hard_constraint*.yaml` | Hard-constraint satisfaction tables |
-| `runtime.yaml` | A 2x3 figure for sCP, TsCP, eCP, and eCP-TPSS |
+| `runtime.yaml` | A 2x3 inference-runtime comparison of sCP and TsCP |
 | `budget_ablation.yaml` | Constant, linear, quadratic, and exponential budgets |
 | `model_ablation_*.yaml` | Coverage and set size vs. total calibration size for multiple models |
 | `loo_validation_*.yaml` | Histograms of independent-test coverage and the corrected LOO estimate `1-alpha_hat_LOO-delta_hat_LOO` |

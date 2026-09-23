@@ -1012,7 +1012,7 @@ def collect_loo_compare_ecp(config: dict) -> pd.DataFrame:
 def collect_runtime(config: dict) -> pd.DataFrame:
     """Time only conformal inference; fitting and score construction are outside the clock."""
     rows = []
-    methods = config["experiment"].get("methods", ["scp", "tscp", "ecp", "ecp_tpss"])
+    methods = config["experiment"].get("methods", ["scp", "tscp"])
     for dataset in config["datasets"]:
         for seed in config["seeds"]:
             task, split, fitted = prepare(config, dataset, seed)
