@@ -333,9 +333,13 @@ def collect_compare(config: dict) -> pd.DataFrame:
                 raise ValueError(f"budget_ranges.{dataset} must satisfy 0 < start <= stop.")
             steps_config = experiment.get("budget_steps", 31)
             steps = int(steps_config.get(dataset, 31) if isinstance(steps_config, dict) else steps_config)
-            if steps < 2:
-                raise ValueError("budget_steps must be at least 2 when using a range.")
-            values = np.linspace(start, stop, steps)
+            if steps < 1:
+                raise ValueError("budget_steps must be at least 1 when using a range.")
+            if steps == 1 and start != stop:
+                raise ValueError(
+                    f"budget_ranges.{dataset} must have equal endpoints when budget_steps=1."
+                )
+            values = np.asarray([start]) if steps == 1 else np.linspace(start, stop, steps)
         else:
             values = np.asarray(experiment["budget_values"][dataset], dtype=float)
         # Classification set sizes are integers. Continuous budgets between
