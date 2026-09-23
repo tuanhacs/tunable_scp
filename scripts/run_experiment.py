@@ -43,7 +43,6 @@ def main() -> Path:
             config["experiment"]["budget_ranges"] = {
                 synthetic: ([4, 20] if task == "regression" else [14, 20])
             }
-            config["experiment"]["match_tscp_C_ranges"] = config["experiment"]["budget_ranges"].copy()
             config["experiment"]["match_coverage_tolerance"] = 1.0
             config["experiment"].pop("budget_values", None)
         if config.get("experiment", {}).get("type") == "model_ablation":

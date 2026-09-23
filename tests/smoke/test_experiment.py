@@ -29,7 +29,6 @@ def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool(tmp_path):
     config["experiment"]["batches"] = 3
     config["experiment"]["budget_steps"] = 1
     config["experiment"]["budget_ranges"] = {"synthetic_regression": [8.0, 8.0]}
-    config["experiment"]["match_tscp_C_ranges"] = {"synthetic_regression": [8.0, 8.0]}
     config["experiment"]["match_coverage_tolerance"] = 1.0
     for variant in config["experiment"]["variants"]:
         if variant["method"] == "tscp":
@@ -49,7 +48,8 @@ def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool(tmp_path):
     assert frame.loc[frame.method == "ecp", "delta"].isna().all()
     matched = summarize_coverage_matched_compare(frame, config)
     assert len(matched) == 1
-    assert (matched["selection"] == "raw_points_within_tolerance").all()
+    assert (matched["selection"] == "paired_batches_within_tolerance").all()
+    assert (matched["ecp_points"] == matched["tscp_points"]).all()
     assert (matched["coverage_gap"] <= matched["coverage_tolerance"]).all()
     make_figures(frame, config, tmp_path)
     for name in (

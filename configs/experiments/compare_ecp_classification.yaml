@@ -17,10 +17,6 @@ experiment:
     synthetic_classification: [15, 15]
     mnist: [4, 4]
     covertype: [4, 4]
-  match_tscp_C_ranges:
-    synthetic_classification: [15, 15]
-    mnist: [4, 4]
-    covertype: [4, 4]
   match_coverage_tolerance: 0.005
   variants:
     - { name: "TsCP", method: tscp, score: one_minus_probability }
