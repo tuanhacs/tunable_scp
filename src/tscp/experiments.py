@@ -2116,8 +2116,8 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
                 label="TsCP" if index == len(panels) - 1 else "_nolegend_",
             )
             ax.set_title(title)
-            ax.set_xlabel("Empirical coverage")
-            if col == 0:
+            if row == nrows - 1 and col == 0:
+                ax.set_xlabel("Empirical coverage")
                 ax.set_ylabel("Average set size")
             ax.grid(alpha=0.25)
             if index == len(panels) - 1:
@@ -2146,8 +2146,8 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             ax.scatter(tscp.coverage, tscp.average_size, marker="o", color="tab:orange", alpha=0.35,
                        label="TsCP" if index == len(panels) - 1 else "_nolegend_")
             ax.set_title(title)
-            ax.set_xlabel("Empirical coverage")
-            if col == 0:
+            if row == nrows - 1 and col == 0:
+                ax.set_xlabel("Empirical coverage")
                 ax.set_ylabel("Average set size")
             ax.grid(alpha=0.25)
             if index == len(panels) - 1:
