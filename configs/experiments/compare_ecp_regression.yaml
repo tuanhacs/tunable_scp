@@ -10,7 +10,7 @@ experiment:
   budget_ranges:
     synthetic_regression: [15.0, 15.0]
     california_housing: [3.0, 3.0]
-    superconductivity: [60.0, 60.0]
+    superconductivity: [40.0, 40.0]
   match_coverage_tolerance: 0.004
   variants:
     - { name: "TsCP", method: tscp, delta: 0.001 }

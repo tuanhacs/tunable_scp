@@ -2,10 +2,10 @@ defaults: [../default.yaml]
 task: classification
 method:
   delta: 1.0
-  delta_by_dataset:
-    synthetic_classification: 2.0
-    mnist: 2.0
-    covertype: 1.0
+  # delta_by_dataset:
+  #   synthetic_classification: 2.0
+  #   mnist: 2.0
+  #   covertype: 1.0
 experiment:
   name: compare_ecp_classification
   type: compare_ecp
@@ -14,7 +14,7 @@ experiment:
   batches: 500
   budget_steps: 1
   budget_ranges:
-    synthetic_classification: [15, 15]
+    synthetic_classification: [16, 16]
     mnist: [4, 4]
     covertype: [4, 4]
   match_coverage_tolerance: 0.005
