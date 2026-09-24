@@ -1373,10 +1373,11 @@ def coverage_matched_compare_points(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Select independent eCP/TsCP clouds whose mean coverages match.
 
-    All points are retained whenever the two cloud means already differ by no
-    more than the configured tolerance. Otherwise, extreme coverage points are
-    trimmed one at a time from whichever cloud gives the largest reduction in
-    the mean-coverage gap. The two selected clouds need not have equal sizes.
+    A point is first retained only when its coverage lies within ``tolerance``
+    of the other cloud's observed coverage range. If the resulting cloud means
+    still differ by too much, extreme coverage points are trimmed one at a time
+    from whichever cloud gives the largest reduction in the mean-coverage gap.
+    The two selected clouds need not have equal sizes.
     """
     experiment = config.get("experiment", {})
     tolerance_config = experiment.get("match_coverage_tolerance", 0.005)
@@ -1457,7 +1458,26 @@ def coverage_matched_compare_points(
         )
         if not np.isfinite(tolerance) or tolerance < 0:
             raise ValueError("match_coverage_tolerance must be finite and non-negative.")
-        matched_ecp, matched_tscp = trim_to_mean_tolerance(ecp, tscp, tolerance)
+        matched_ecp = ecp[
+            ecp.coverage.between(
+                float(tscp.coverage.min()) - tolerance,
+                float(tscp.coverage.max()) + tolerance,
+            )
+        ].copy()
+        matched_tscp = tscp[
+            tscp.coverage.between(
+                float(ecp.coverage.min()) - tolerance,
+                float(ecp.coverage.max()) + tolerance,
+            )
+        ].copy()
+        if matched_ecp.empty or matched_tscp.empty:
+            raise ValueError(
+                f"The eCP and TsCP coverage clouds for {dataset} have no points "
+                f"within tolerance={tolerance:g} of the other cloud's range."
+            )
+        matched_ecp, matched_tscp = trim_to_mean_tolerance(
+            matched_ecp, matched_tscp, tolerance,
+        )
 
         ecp_coverage_mean = float(matched_ecp.coverage.mean())
         tscp_coverage_mean = float(matched_tscp.coverage.mean())
@@ -1481,6 +1501,7 @@ def coverage_matched_compare_points(
 
         ecp_size_mean = float(matched_ecp.average_size.mean())
         tscp_size_mean = float(matched_tscp.average_size.mean())
+        matched_coverage = 0.5 * (ecp_coverage_mean + tscp_coverage_mean)
         overlap_lower = max(float(matched_ecp.coverage.min()), float(matched_tscp.coverage.min()))
         overlap_upper = min(float(matched_ecp.coverage.max()), float(matched_tscp.coverage.max()))
         reduction = ecp_size_mean - tscp_size_mean
@@ -1501,6 +1522,7 @@ def coverage_matched_compare_points(
             "tscp_points": int(len(matched_tscp)),
             "tscp_mean_coverage": tscp_coverage_mean,
             "tscp_average_size": tscp_size_mean,
+            "matched_coverage": matched_coverage,
             "coverage_gap": cloud_coverage_gap,
             "size_reduction": reduction,
             "size_reduction_percent": (
@@ -1805,6 +1827,9 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             ecp_points = points[points.method == "ecp"]
             tscp_points = points[points.method == "tscp"]
             summary = matched[matched.dataset == dataset]
+            if len(summary) != 1:
+                raise ValueError(f"Expected one coverage-match summary for {dataset}.")
+            match = summary.iloc[0]
             ax.scatter(
                 ecp_points.coverage, ecp_points.average_size,
                 marker="x", color="tab:blue", s=30, alpha=0.85,
@@ -1815,22 +1840,27 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
                 marker="o", color="tab:orange", s=25, alpha=0.75,
                 label="TsCP" if col == 0 else "_nolegend_",
             )
+            ax.plot(
+                [match.matched_coverage, match.matched_coverage],
+                [match.ecp_average_size, match.tscp_average_size],
+                color="black", linestyle="--", linewidth=1.2, alpha=0.75,
+                zorder=3,
+            )
             ax.scatter(
-                summary.ecp_mean_coverage, summary.ecp_average_size,
+                [match.matched_coverage], [match.ecp_average_size],
                 marker="s", color="tab:green", s=90, zorder=4,
                 label="eCP mean" if col == 0 else "_nolegend_",
             )
             ax.scatter(
-                summary.tscp_mean_coverage, summary.tscp_average_size,
+                [match.matched_coverage], [match.tscp_average_size],
                 marker="D", color="tab:red", s=80, zorder=4,
                 label="TsCP mean" if col == 0 else "_nolegend_",
             )
-            for _, match in summary.iterrows():
-                if match.overlap_coverage_min <= match.overlap_coverage_max:
-                    ax.axvspan(
-                        match.overlap_coverage_min, match.overlap_coverage_max,
-                        color="grey", alpha=0.08, zorder=0,
-                    )
+            if match.overlap_coverage_min <= match.overlap_coverage_max:
+                ax.axvspan(
+                    match.overlap_coverage_min, match.overlap_coverage_max,
+                    color="grey", alpha=0.08, zorder=0,
+                )
             ax.set_title(_dataset_display_name(dataset))
             ax.grid(alpha=0.25)
             if col == 0:
