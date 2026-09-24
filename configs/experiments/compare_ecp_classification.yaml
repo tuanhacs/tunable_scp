@@ -21,15 +21,15 @@ experiment:
   # batch is retained only when both methods fall in the same target window.
   match_coverage_target:
     synthetic_classification: 0.972
-    mnist: 0.988
-    covertype: 0.998
+    mnist: 0.9875
+    covertype: 0.9975
   match_coverage_tolerance:
     synthetic_classification: 0.003
     mnist: 0.003
     covertype: 0.002
   variants:
     - { name: "TsCP", method: tscp, score: one_minus_probability }
-    - { name: "eCP", method: ecp, score: one_minus_probability }
+    - { name: "eCP", method: ecp, score: negative_log_probability }
 seeds: [0]
 seeds_by_dataset:
   synthetic_classification: [0]
