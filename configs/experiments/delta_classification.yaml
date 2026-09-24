@@ -16,3 +16,5 @@ budget:
     covertype: 4
 data:
   total_calibration_size: 2000
+method:
+  epsilon: 0.005

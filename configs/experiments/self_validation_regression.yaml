@@ -3,16 +3,16 @@ task: regression
 experiment:
   name: self_validation_regression
   type: self_validation
-  reference_trials: 500
+  reference_trials: 2000
 datasets: [synthetic_regression, california_housing]
 budget:
   value_by_dataset:
     synthetic_regression: 15.0
     california_housing: 2.0
-    superconductivity: 40.0
+    superconductivity: 60.0
 method:
   delta: 0.1
   delta_by_dataset:
     synthetic_regression: 1.0
     california_housing: 0.2
-    superconductivity: 4.0
+    superconductivity: 8.0

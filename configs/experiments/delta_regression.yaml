@@ -7,12 +7,14 @@ experiment:
   delta_ranges:
     synthetic_regression: [0.01, 2.0]
     california_housing: [0.01, 0.5]
-    superconductivity: [0.01, 5.0]
+    superconductivity: [5.0, 10.0]
 datasets: [synthetic_regression, california_housing, superconductivity]
 budget:
   value_by_dataset:
     synthetic_regression: 15.0
     california_housing: 2.0
-    superconductivity: 40.0
+    superconductivity: 60.0
 data:
   total_calibration_size: 2000
+method:
+  epsilon: 0.005
