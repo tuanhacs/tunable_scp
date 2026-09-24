@@ -87,6 +87,7 @@ def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool(tmp_path):
         "figure.pdf", "figure.png", "coverage_matched.pdf", "coverage_matched.png",
         "compare_ecp_points.csv", "compare_ecp_coverage_matched.csv",
         "compare_ecp_coverage_matched_points.csv",
+        "compare_ecp_coverage_matched_summary.csv",
     ):
         assert (tmp_path / name).is_file()
 

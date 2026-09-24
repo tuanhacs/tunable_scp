@@ -1,16 +1,33 @@
 defaults: [../default.yaml]
-task: regression
 experiment:
   name: budget_ablation
   type: budget_ablation
-  budget_types: [constant, linear, quadratic, exponential]
+  trials_by_dataset:
+    california_housing: 8000
+    mnist: 8000
+  batch_size_by_dataset:
+    california_housing: 1000
+    mnist: 1000
+  batches_by_dataset:
+    california_housing: 1000
+    mnist: 1000
+  budget_variants_by_dataset:
+    california_housing:
+      - { name: sigma, title: "Sigma-based Budget", uncertainty: sigma }
+      - { name: log_sigma, title: "Log-sigma Budget", uncertainty: log_sigma }
+    mnist:
+      - { name: entropy, title: "Entropy-based Budget", uncertainty: entropy }
+      - { name: margin, title: "Margin-based Budget", uncertainty: margin }
 datasets: [california_housing, mnist]
 method:
-  delta: 1.1
+  score: one_minus_probability
+  delta_by_dataset:
+    california_housing: 0.001
+    mnist: 1.0
 budget:
-  value_by_dataset:
-    california_housing: 2.0
-    mnist: 4
-  minimum: 1.5
-  maximum: 4.0
-  beta: 3.0
+  minimum_by_dataset:
+    california_housing: 2.5
+    mnist: 2.0
+  maximum_by_dataset:
+    california_housing: 3.5
+    mnist: 4.0

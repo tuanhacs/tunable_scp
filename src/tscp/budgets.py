@@ -45,6 +45,22 @@ def normalized_uncertainty(values: np.ndarray, reference: np.ndarray) -> np.ndar
     return np.clip((values - lo) / (hi - lo + 1e-12), 0.0, 1.0)
 
 
+def regression_uncertainty(
+    scales: np.ndarray,
+    reference: np.ndarray,
+    kind: str = "sigma",
+) -> np.ndarray:
+    """Normalize regression uncertainty on either the scale or log-scale."""
+    kind = str(kind).lower()
+    scales = np.maximum(np.asarray(scales, dtype=float), 1e-12)
+    reference = np.maximum(np.asarray(reference, dtype=float), 1e-12)
+    if kind in {"auto", "sigma"}:
+        return normalized_uncertainty(scales, reference)
+    if kind in {"log_sigma", "log-sigma"}:
+        return normalized_uncertainty(np.log(scales), np.log(reference))
+    raise ValueError(f"Unknown regression uncertainty {kind!r}.")
+
+
 def classification_uncertainty(probabilities: np.ndarray, kind: str = "entropy") -> np.ndarray:
     probs = np.clip(np.asarray(probabilities, dtype=float), 1e-12, 1.0)
     if kind in {"auto", "entropy"}:

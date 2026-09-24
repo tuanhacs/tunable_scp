@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
 
-from .budgets import BudgetSpec, classification_uncertainty, evaluate_budget, normalized_uncertainty
+from .budgets import BudgetSpec, classification_uncertainty, evaluate_budget, regression_uncertainty
 from .data import DataSplit
 from .methods.ecp import ECPClassification, ECPRegression
 from .methods.tscp import TsCPClassification, TsCPRegression
@@ -56,8 +56,12 @@ def evaluate_regression(
     d1, d2 = _indices(len(split.y_cal), total_calibration_size, seed)
     scores = np.abs(split.y_cal - predictions.pred_cal) / np.maximum(predictions.scale_cal, 1e-12)
     # The normalization reference is training-fitted and therefore independent of D1/D2 labels.
-    u_cal = normalized_uncertainty(predictions.scale_cal, predictions.scale_reference)
-    u_test = normalized_uncertainty(predictions.scale_test, predictions.scale_reference)
+    u_cal = regression_uncertainty(
+        predictions.scale_cal, predictions.scale_reference, budget_spec.uncertainty,
+    )
+    u_test = regression_uncertainty(
+        predictions.scale_test, predictions.scale_reference, budget_spec.uncertainty,
+    )
     budgets_cal = evaluate_budget(budget_spec, u_cal)
     budgets_test = evaluate_budget(budget_spec, u_test)
     limit = min(number_test, len(split.y_test))

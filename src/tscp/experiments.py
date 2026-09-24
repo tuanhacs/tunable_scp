@@ -14,7 +14,13 @@ from matplotlib.ticker import MaxNLocator
 import numpy as np
 import pandas as pd
 
-from .budgets import BudgetSpec, classification_uncertainty, evaluate_budget, normalized_uncertainty
+from .budgets import (
+    BudgetSpec,
+    classification_uncertainty,
+    evaluate_budget,
+    normalized_uncertainty,
+    regression_uncertainty,
+)
 from .data import load_dataset, split_dataset
 from .evaluation import classification_scores, evaluate_classification, evaluate_regression
 from .methods.ecp import ECPClassification, ECPRegression
@@ -613,16 +619,157 @@ def collect_constraint_compare_ecp(config: dict) -> pd.DataFrame:
 
 
 def collect_budget_ablation(config: dict) -> pd.DataFrame:
+    """Paired coverage--size clouds for input-dependent budget functions."""
     rows = []
+    experiment = config["experiment"]
+    method_config = config.get("method", {})
+    variants_by_dataset = experiment.get("budget_variants_by_dataset", {})
+    if not variants_by_dataset:
+        raise ValueError("budget_ablation requires experiment.budget_variants_by_dataset.")
+
+    def dataset_value(key: str, dataset: str, default: int) -> int:
+        by_dataset = experiment.get(f"{key}_by_dataset", {})
+        return int(by_dataset.get(dataset, experiment.get(key, default)))
+
+    budget_config = config.get("budget", {})
+    minimum_by_dataset = budget_config.get("minimum_by_dataset", {})
+    maximum_by_dataset = budget_config.get("maximum_by_dataset", {})
+    epsilon = alpha_epsilon(config)
+    score_type = str(method_config.get("score", "one_minus_probability"))
+    tie_epsilon = float(method_config.get("tie_break_epsilon", 0.0))
+    total = int(config.get("data", {}).get("total_calibration_size", 2000))
+
     for dataset in config["datasets"]:
-        for kind in config["experiment"]["budget_types"]:
-            spec = budget_for_dataset(config, dataset, kind=kind)
-            for seed in config["seeds"]:
-                for method in ("tscp", "ecp"):
-                    _, result = evaluate(config, dataset, seed, method=method, budget=spec)
-                    rows.append({"dataset": dataset, "seed": seed, "budget_type": kind, "method": method,
-                                 "coverage": result.coverage, "average_size": result.average_size,
-                                 "hard_accuracy": result.hard_constraint_accuracy, **_theory_columns(result)})
+        raw_variants = variants_by_dataset.get(dataset, [])
+        if not raw_variants:
+            raise ValueError(f"No budget variants configured for dataset {dataset!r}.")
+        minimum = float(minimum_by_dataset.get(dataset, budget_config.get("minimum", 1.0)))
+        maximum = float(maximum_by_dataset.get(dataset, budget_config.get("maximum", minimum)))
+        specs = {
+            str(item["name"]): BudgetSpec(
+                kind="linear",
+                minimum=minimum,
+                maximum=maximum,
+                uncertainty=str(item["uncertainty"]),
+            )
+            for item in raw_variants
+        }
+        titles = {str(item["name"]): str(item.get("title", item["name"])) for item in raw_variants}
+        trials = dataset_value("trials", dataset, 2000)
+        batch_size = dataset_value("batch_size", dataset, trials)
+        batches = dataset_value("batches", dataset, 1)
+        if trials < 1 or not 1 <= batch_size <= trials or batches < 1:
+            raise ValueError(
+                f"Invalid budget_ablation sampling configuration for {dataset!r}: "
+                f"trials={trials}, batch_size={batch_size}, batches={batches}."
+            )
+
+        for outer_seed in seeds_for_dataset(config, dataset):
+            task, split, fitted = prepare(config, dataset, int(outer_seed))
+            if total % 2 or total > len(split.y_cal):
+                raise ValueError("total calibration size must be even and no larger than the pool.")
+            uncertainty_by_variant = {}
+            for name, spec in specs.items():
+                if task == "regression":
+                    uncertainty_by_variant[name] = regression_uncertainty(
+                        fitted.scale_test, fitted.scale_reference, spec.uncertainty,
+                    )
+                else:
+                    uncertainty_by_variant[name] = classification_uncertainty(
+                        fitted.probs_test, spec.uncertainty,
+                    )
+
+            if task == "regression":
+                cal_scores = np.abs(split.y_cal - fitted.pred_cal) / np.maximum(fitted.scale_cal, 1e-12)
+            else:
+                scores_cal = classification_scores(fitted.probs_cal, score_type)
+                scores_test = classification_scores(fitted.probs_test, score_type)
+
+            accumulators = {
+                (name, method): {"covered": [], "sizes": [], "budgets": []}
+                for name in specs for method in ("tscp", "ecp")
+            }
+            delta = delta_for_dataset(config, dataset)
+            for trial in range(trials):
+                trial_seed = int(outer_seed) * 10_000_000 + total * 1_000 + trial
+                rng = np.random.default_rng(trial_seed)
+                selected = rng.choice(len(split.y_cal), total, replace=False)
+                d1, d2 = selected[: total // 2], selected[total // 2 :]
+                test_index = int(rng.integers(0, len(split.y_test)))
+
+                if task == "regression":
+                    methods = {
+                        "tscp": TsCPRegression(cal_scores[d1], cal_scores[d2], epsilon, delta),
+                        "ecp": ECPRegression(cal_scores[selected], epsilon),
+                    }
+                else:
+                    selected_scores = scores_cal[selected].copy()
+                    test_scores = scores_test[test_index].copy()
+                    if tie_epsilon > 0:
+                        score_rng = np.random.default_rng(trial_seed + 7919)
+                        selected_scores += score_rng.uniform(0.0, tie_epsilon, selected_scores.shape)
+                        test_scores += score_rng.uniform(0.0, tie_epsilon, test_scores.shape)
+                    true_selected = selected_scores[
+                        np.arange(total), split.y_cal[selected].astype(int)
+                    ]
+                    methods = {
+                        "tscp": TsCPClassification(
+                            true_selected[: total // 2], true_selected[total // 2 :], epsilon, delta,
+                        ),
+                        "ecp": ECPClassification(true_selected, epsilon),
+                    }
+
+                for name, spec in specs.items():
+                    test_budget = float(evaluate_budget(
+                        spec,
+                        np.asarray([uncertainty_by_variant[name][test_index]]),
+                        classification=(task == "classification"),
+                    )[0])
+                    for method_name, method in methods.items():
+                        if task == "regression":
+                            prediction, _ = method.predict_one(
+                                fitted.pred_test[test_index], fitted.scale_test[test_index], test_budget,
+                            )
+                            covered = float(prediction[0] <= split.y_test[test_index] <= prediction[1])
+                            prediction_size = float(prediction[1] - prediction[0])
+                        else:
+                            prediction, _ = method.predict_one(test_scores, test_budget)
+                            covered = float(prediction[int(split.y_test[test_index])])
+                            prediction_size = float(prediction.sum())
+                        bucket = accumulators[(name, method_name)]
+                        bucket["covered"].append(covered)
+                        bucket["sizes"].append(prediction_size)
+                        bucket["budgets"].append(test_budget)
+
+            batch_rng = np.random.default_rng(4_000_000_000 + int(outer_seed))
+            batch_indices = [
+                batch_rng.choice(trials, batch_size, replace=False)
+                for _ in range(batches)
+            ]
+            for name in specs:
+                for method_name in ("tscp", "ecp"):
+                    bucket = accumulators[(name, method_name)]
+                    covered = np.asarray(bucket["covered"], dtype=float)
+                    sizes = np.asarray(bucket["sizes"], dtype=float)
+                    actual_budgets = np.asarray(bucket["budgets"], dtype=float)
+                    for batch, indices in enumerate(batch_indices):
+                        batch_sizes = sizes[indices]
+                        batch_budgets = actual_budgets[indices]
+                        rows.append({
+                            "dataset": dataset,
+                            "seed": int(outer_seed),
+                            "batch": batch,
+                            "budget_type": name,
+                            "budget_title": titles[name],
+                            "method": method_name,
+                            "delta": delta if method_name == "tscp" else np.nan,
+                            "base_trials": trials,
+                            "batch_size": batch_size,
+                            "coverage": float(covered[indices].mean()),
+                            "average_size": float(batch_sizes.mean()),
+                            "average_budget": float(batch_budgets.mean()),
+                            "hard_accuracy": float(np.mean(batch_sizes <= batch_budgets)),
+                        })
     return pd.DataFrame(rows)
 
 
@@ -1785,8 +1932,11 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
                 ax.legend(loc="best")
 
         matched_points, matched = coverage_matched_compare_points(frame, config)
+        # Primary matched file: point cloud used directly by downstream plots.
+        matched_points.to_csv(output / "compare_ecp_coverage_matched.csv", index=False)
+        # Retain the explicit points filename for backward compatibility.
         matched_points.to_csv(output / "compare_ecp_coverage_matched_points.csv", index=False)
-        matched.to_csv(output / "compare_ecp_coverage_matched.csv", index=False)
+        matched.to_csv(output / "compare_ecp_coverage_matched_summary.csv", index=False)
         matched_fig, matched_axes = plt.subplots(
             1, len(datasets),
             figsize=_plot_figsize(config, (5.2 * len(datasets), 4.5)),
@@ -1815,16 +1965,43 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
                 ax.legend(loc="lower left")
         _save_figure(matched_fig, output, "coverage_matched", config)
     elif kind == "budget_ablation":
+        panel_order = [
+            ("california_housing", "sigma"),
+            ("california_housing", "log_sigma"),
+            ("mnist", "entropy"),
+            ("mnist", "margin"),
+        ]
+        available = set(zip(frame.dataset, frame.budget_type))
+        panels = [panel for panel in panel_order if panel in available]
+        if len(panels) != 4:
+            panels = list(frame[["dataset", "budget_type"]].drop_duplicates().itertuples(index=False, name=None))
+        ncols = 2
+        nrows = int(np.ceil(len(panels) / ncols))
         fig, axes = plt.subplots(
-            1, len(datasets), figsize=_plot_figsize(config, (6 * len(datasets), 4.5)), squeeze=False,
+            nrows, ncols,
+            figsize=_plot_figsize(config, (10.4, 4.5 * nrows)),
+            squeeze=False,
         )
-        key = "budget_type"
-        avg = _mean(frame, ["dataset", key, "method"], ["coverage", "average_size"])
-        for ax, dataset in zip(axes[0], datasets):
-            part = avg[avg.dataset == dataset]
-            for labels, group in part.groupby([key, "method"]):
-                ax.plot(group.coverage, group.average_size, marker="o", label=" / ".join(labels))
-            ax.set(title=_dataset_display_name(dataset), xlabel="Coverage", ylabel="Average prediction-set size")
+        for index, (dataset, budget_type) in enumerate(panels):
+            row, col = divmod(index, ncols)
+            ax = axes[row, col]
+            part = frame[(frame.dataset == dataset) & (frame.budget_type == budget_type)]
+            title = str(part.budget_title.iloc[0]) if "budget_title" in part else str(budget_type)
+            ecp = part[part.method == "ecp"]
+            tscp = part[part.method == "tscp"]
+            ax.scatter(ecp.coverage, ecp.average_size, marker="x", color="tab:blue", alpha=0.35,
+                       label="eCP" if index == len(panels) - 1 else "_nolegend_")
+            ax.scatter(tscp.coverage, tscp.average_size, marker="o", color="tab:orange", alpha=0.35,
+                       label="TsCP" if index == len(panels) - 1 else "_nolegend_")
+            ax.set_title(title)
+            ax.set_xlabel("Empirical coverage")
+            if col == 0:
+                ax.set_ylabel("Average set size")
+            ax.grid(alpha=0.25)
+            if index == len(panels) - 1:
+                ax.legend()
+        for index in range(len(panels), nrows * ncols):
+            axes.flat[index].set_visible(False)
     elif kind == "model_ablation":
         fig, axes = plt.subplots(
             2, len(datasets), figsize=_plot_figsize(config, (6 * len(datasets), 8)), squeeze=False,
