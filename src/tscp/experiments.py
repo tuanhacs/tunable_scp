@@ -1371,72 +1371,17 @@ def loo_coverage_report_table(summary: pd.DataFrame) -> pd.DataFrame:
 def coverage_matched_compare_points(
     frame: pd.DataFrame, config: dict,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Select independent eCP/TsCP clouds whose mean coverages match.
+    """Select eCP/TsCP points through one shared coverage window.
 
-    A point is first retained only when its coverage lies in the exact overlap
-    of the two observed coverage ranges (the shaded region in the matched
-    figure). If the resulting cloud means still differ by too much, extreme
-    coverage points are trimmed one at a time from whichever cloud gives the
-    largest reduction in the mean-coverage gap. The two selected clouds need
-    not have equal sizes.
+    The window is centered at the midpoint of the two raw cloud means and has
+    total width equal to the configured tolerance. Applying exactly the same
+    interval to both clouds guarantees that their selected mean coverages
+    differ by at most the tolerance, while allowing unequal point counts.
     """
     experiment = config.get("experiment", {})
     tolerance_config = experiment.get("match_coverage_tolerance", 0.005)
     point_rows = []
     summary_rows = []
-
-    def trim_to_mean_tolerance(
-        ecp_points: pd.DataFrame, tscp_points: pd.DataFrame, tolerance: float,
-    ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        selected_ecp = ecp_points.copy()
-        selected_tscp = tscp_points.copy()
-        numerical_margin = 1e-12
-
-        while True:
-            current_gap = abs(
-                float(selected_ecp.coverage.mean())
-                - float(selected_tscp.coverage.mean())
-            )
-            if current_gap <= tolerance + numerical_margin:
-                return selected_ecp, selected_tscp
-
-            ecp_is_higher = (
-                float(selected_ecp.coverage.mean())
-                > float(selected_tscp.coverage.mean())
-            )
-            candidates = []
-            if len(selected_ecp) > 1:
-                ecp_drop = (
-                    selected_ecp.coverage.idxmax()
-                    if ecp_is_higher else selected_ecp.coverage.idxmin()
-                )
-                candidate_ecp = selected_ecp.drop(index=ecp_drop)
-                candidate_gap = abs(
-                    float(candidate_ecp.coverage.mean())
-                    - float(selected_tscp.coverage.mean())
-                )
-                candidates.append((candidate_gap, "ecp", candidate_ecp, selected_tscp))
-            if len(selected_tscp) > 1:
-                tscp_drop = (
-                    selected_tscp.coverage.idxmin()
-                    if ecp_is_higher else selected_tscp.coverage.idxmax()
-                )
-                candidate_tscp = selected_tscp.drop(index=tscp_drop)
-                candidate_gap = abs(
-                    float(selected_ecp.coverage.mean())
-                    - float(candidate_tscp.coverage.mean())
-                )
-                candidates.append((candidate_gap, "tscp", selected_ecp, candidate_tscp))
-
-            improving = [item for item in candidates if item[0] < current_gap - numerical_margin]
-            if not improving:
-                raise ValueError(
-                    "Unable to select non-empty eCP/TsCP clouds with mean coverage "
-                    f"gap <= {tolerance:g}; the closest gap reached is {current_gap:g}."
-                )
-            _, _, selected_ecp, selected_tscp = min(
-                improving, key=lambda item: (item[0], item[1]),
-            )
 
     for dataset in config["datasets"]:
         dataset_points = frame[frame.dataset == dataset]
@@ -1459,12 +1404,11 @@ def coverage_matched_compare_points(
         )
         if not np.isfinite(tolerance) or tolerance < 0:
             raise ValueError("match_coverage_tolerance must be finite and non-negative.")
-        overlap_lower = max(float(ecp.coverage.min()), float(tscp.coverage.min()))
-        overlap_upper = min(float(ecp.coverage.max()), float(tscp.coverage.max()))
-        if overlap_lower > overlap_upper:
-            raise ValueError(
-                f"The eCP and TsCP coverage ranges for {dataset} do not overlap."
-            )
+        raw_ecp_mean = float(ecp.coverage.mean())
+        raw_tscp_mean = float(tscp.coverage.mean())
+        window_center = 0.5 * (raw_ecp_mean + raw_tscp_mean)
+        overlap_lower = window_center - 0.5 * tolerance
+        overlap_upper = window_center + 0.5 * tolerance
         matched_ecp = ecp[
             ecp.coverage.between(overlap_lower, overlap_upper)
         ].copy()
@@ -1473,16 +1417,19 @@ def coverage_matched_compare_points(
         ].copy()
         if matched_ecp.empty or matched_tscp.empty:
             raise ValueError(
-                f"The eCP and TsCP coverage clouds for {dataset} have no observed "
-                "points in their common coverage range."
+                f"The shared coverage window [{overlap_lower:g}, {overlap_upper:g}] "
+                f"for {dataset} leaves one method with no points; increase "
+                "match_coverage_tolerance or choose closer operating points."
             )
-        matched_ecp, matched_tscp = trim_to_mean_tolerance(
-            matched_ecp, matched_tscp, tolerance,
-        )
 
         ecp_coverage_mean = float(matched_ecp.coverage.mean())
         tscp_coverage_mean = float(matched_tscp.coverage.mean())
         cloud_coverage_gap = abs(ecp_coverage_mean - tscp_coverage_mean)
+        if cloud_coverage_gap > tolerance + 1e-12:
+            raise RuntimeError(
+                f"Shared-window matching produced coverage gap {cloud_coverage_gap:g} "
+                f"above tolerance {tolerance:g} for {dataset}."
+            )
         match_id = f"{dataset}:clouds"
         for method_name, selected in (("ecp", matched_ecp), ("tscp", matched_tscp)):
             for _, point in selected.iterrows():
@@ -1507,7 +1454,7 @@ def coverage_matched_compare_points(
         summary_rows.append({
             "dataset": dataset,
             "match_id": match_id,
-            "selection": "independent_cloud_means_within_tolerance",
+            "selection": "shared_coverage_window",
             "ecp_budget": float(ecp.budget.iloc[0]),
             "tscp_budget": float(tscp.budget.iloc[0]),
             "coverage_tolerance": tolerance,

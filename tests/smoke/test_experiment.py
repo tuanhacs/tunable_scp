@@ -49,7 +49,7 @@ def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool(tmp_path):
     assert frame.loc[frame.method == "ecp", "delta"].isna().all()
     matched = summarize_coverage_matched_compare(frame, config)
     assert len(matched) == 1
-    assert (matched["selection"] == "independent_cloud_means_within_tolerance").all()
+    assert (matched["selection"] == "shared_coverage_window").all()
     assert (matched["coverage_gap"] <= matched["coverage_tolerance"]).all()
     matched_points, matched_summary = coverage_matched_compare_points(frame, config)
     lower = float(matched_summary.overlap_coverage_min.iloc[0])
