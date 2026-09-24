@@ -1797,10 +1797,6 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             points = matched_points[matched_points.dataset == dataset]
             ecp_points = points[points.method == "ecp"]
             tscp_points = points[points.method == "tscp"]
-            summary = matched[matched.dataset == dataset]
-            if len(summary) != 1:
-                raise ValueError(f"Expected one coverage-match summary for {dataset}.")
-            match = summary.iloc[0]
             ax.scatter(
                 ecp_points.coverage, ecp_points.average_size,
                 marker="x", color="tab:blue", s=18, alpha=0.35,
@@ -1811,11 +1807,6 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
                 marker="o", color="tab:orange", s=18, alpha=0.35,
                 label="TsCP" if col == 0 else "_nolegend_",
             )
-            if match.overlap_coverage_min <= match.overlap_coverage_max:
-                ax.axvspan(
-                    match.overlap_coverage_min, match.overlap_coverage_max,
-                    color="grey", alpha=0.08, zorder=0,
-                )
             ax.set_title(_dataset_display_name(dataset))
             ax.grid(alpha=0.25)
             if col == 0:

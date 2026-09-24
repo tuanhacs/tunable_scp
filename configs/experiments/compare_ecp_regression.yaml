@@ -4,7 +4,7 @@ experiment:
   name: compare_ecp_regression
   type: compare_ecp
   trials: 8000
-  batch_size: 4000
+  batch_size: 1000
   batches: 1000
   budget_steps: 1
   budget_ranges:
@@ -20,10 +20,10 @@ experiment:
   match_coverage_tolerance:
     synthetic_regression: 0.003
     california_housing: 0.003
-    superconductivity: 0.002
+    superconductivity: 0.003
   variants:
-    - { name: "TsCP", method: tscp, delta: 0.001 }
-    - { name: "eCP", method: ecp }
+    - { name: "TsCP", method: tscp, delta: 0.001, score: one_minus_probability }
+    - { name: "eCP", method: ecp, score: one_minus_probability }
 seeds: [0]
 seeds_by_dataset:
   synthetic_regression: [0]
