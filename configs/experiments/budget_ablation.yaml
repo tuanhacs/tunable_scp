@@ -12,8 +12,12 @@ experiment:
     california_housing: 500
     mnist: 1000
   match_coverage_target:
-    california_housing: 0.976
-    mnist: 0.978
+    california_housing:
+      sigma: 0.976
+      log_sigma: 0.976
+    mnist:
+      entropy: 0.978
+      margin: 0.978
   match_coverage_tolerance:
     california_housing: 0.003
     mnist: 0.003

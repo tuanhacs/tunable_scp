@@ -53,8 +53,8 @@ def test_budget_ablation_matching_keeps_only_shared_paired_batches(tmp_path):
     frame = pd.DataFrame(rows)
     config = {
         "experiment": {
-            "match_coverage_target": {"mnist": 0.90},
-            "match_coverage_tolerance": {"mnist": 0.02},
+            "match_coverage_target": {"mnist": {"entropy": 0.90}},
+            "match_coverage_tolerance": {"mnist": {"entropy": 0.02}},
         }
     }
     points, summary = coverage_matched_budget_points(frame, config)

@@ -1668,11 +1668,18 @@ def coverage_matched_budget_points(
             "budget_ablation coverage matching requires experiment.match_coverage_target."
         )
 
-    def resolve(value, dataset: str, default=None) -> float:
+    def resolve(value, dataset: str, budget_type: str, default=None) -> float:
         if isinstance(value, dict):
             if dataset not in value and "default" not in value:
                 raise ValueError(f"Coverage matching has no value for dataset {dataset!r}.")
-            return float(value.get(dataset, value.get("default")))
+            dataset_value = value.get(dataset, value.get("default"))
+            if isinstance(dataset_value, dict):
+                if budget_type not in dataset_value and "default" not in dataset_value:
+                    raise ValueError(
+                        f"Coverage matching has no value for {dataset!r}/{budget_type!r}."
+                    )
+                dataset_value = dataset_value.get(budget_type, dataset_value.get("default"))
+            return float(dataset_value)
         if value is None:
             return float(default)
         return float(value)
@@ -1684,8 +1691,8 @@ def coverage_matched_budget_points(
         part = frame[(frame.dataset == dataset) & (frame.budget_type == budget_type)]
         ecp = part[part.method == "ecp"]
         tscp = part[part.method == "tscp"]
-        tolerance = resolve(tolerance_config, dataset, 0.005)
-        target = resolve(target_config, dataset)
+        tolerance = resolve(tolerance_config, dataset, budget_type, 0.005)
+        target = resolve(target_config, dataset, budget_type)
         if not np.isfinite(tolerance) or tolerance < 0:
             raise ValueError("match_coverage_tolerance must be finite and non-negative.")
         if not np.isfinite(target) or not 0.0 <= target <= 1.0:
