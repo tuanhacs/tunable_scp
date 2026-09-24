@@ -49,8 +49,15 @@ def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool(tmp_path):
     assert frame.loc[frame.method == "ecp", "delta"].isna().all()
     matched = summarize_coverage_matched_compare(frame, config)
     assert len(matched) == 1
-    assert (matched["selection"] == "shared_coverage_window").all()
-    assert (matched["coverage_gap"] <= matched["coverage_tolerance"]).all()
+    assert (matched["selection"] == "preselected_target_coverage_window").all()
+    assert (
+        (matched["ecp_mean_coverage"] - matched["coverage_target"]).abs()
+        <= matched["coverage_tolerance"]
+    ).all()
+    assert (
+        (matched["tscp_mean_coverage"] - matched["coverage_target"]).abs()
+        <= matched["coverage_tolerance"]
+    ).all()
     matched_points, matched_summary = coverage_matched_compare_points(frame, config)
     lower = float(matched_summary.overlap_coverage_min.iloc[0])
     upper = float(matched_summary.overlap_coverage_max.iloc[0])
@@ -62,7 +69,7 @@ def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool(tmp_path):
     unequal_matched = summarize_coverage_matched_compare(unequal_frame, config)
     assert int(unequal_matched.ecp_points.iloc[0]) == 2
     assert int(unequal_matched.tscp_points.iloc[0]) == 3
-    assert unequal_matched.coverage_gap.iloc[0] <= unequal_matched.coverage_tolerance.iloc[0]
+    assert unequal_matched.coverage_gap.iloc[0] <= 2 * unequal_matched.coverage_tolerance.iloc[0]
     make_figures(frame, config, tmp_path)
     for name in (
         "figure.pdf", "figure.png", "coverage_matched.pdf", "coverage_matched.png",

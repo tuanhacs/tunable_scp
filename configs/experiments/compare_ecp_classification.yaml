@@ -17,6 +17,12 @@ experiment:
     synthetic_classification: [16, 16]
     mnist: [4, 4]
     covertype: [4, 4]
+  # Edit these pre-chosen targets using the raw coverage-size plot. Both
+  # methods use the same target and tolerance within each dataset.
+  match_coverage_target:
+    synthetic_classification: 0.90
+    mnist: 0.98
+    covertype: 0.90
   match_coverage_tolerance: 0.005
   variants:
     - { name: "TsCP", method: tscp, score: one_minus_probability }

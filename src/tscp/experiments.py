@@ -1371,15 +1371,20 @@ def loo_coverage_report_table(summary: pd.DataFrame) -> pd.DataFrame:
 def coverage_matched_compare_points(
     frame: pd.DataFrame, config: dict,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Select eCP/TsCP points through one shared coverage window.
+    """Select eCP/TsCP points around one pre-specified target coverage.
 
-    The window is centered at the midpoint of the two raw cloud means and has
-    total width equal to the configured tolerance. Applying exactly the same
-    interval to both clouds guarantees that their selected mean coverages
-    differ by at most the tolerance, while allowing unequal point counts.
+    Both clouds use the same interval ``target +/- tolerance``. Point counts
+    may differ, but neither method influences the interval selected for the
+    other method.
     """
     experiment = config.get("experiment", {})
     tolerance_config = experiment.get("match_coverage_tolerance", 0.005)
+    target_config = experiment.get("match_coverage_target")
+    if target_config is None:
+        raise ValueError(
+            "compare_ecp coverage matching requires experiment.match_coverage_target "
+            "as either a scalar or a dataset-to-target mapping."
+        )
     point_rows = []
     summary_rows = []
 
@@ -1404,11 +1409,18 @@ def coverage_matched_compare_points(
         )
         if not np.isfinite(tolerance) or tolerance < 0:
             raise ValueError("match_coverage_tolerance must be finite and non-negative.")
-        raw_ecp_mean = float(ecp.coverage.mean())
-        raw_tscp_mean = float(tscp.coverage.mean())
-        window_center = 0.5 * (raw_ecp_mean + raw_tscp_mean)
-        overlap_lower = window_center - 0.5 * tolerance
-        overlap_upper = window_center + 0.5 * tolerance
+        if isinstance(target_config, dict):
+            if dataset not in target_config and "default" not in target_config:
+                raise ValueError(
+                    f"match_coverage_target has no value for dataset {dataset!r}."
+                )
+            coverage_target = float(target_config.get(dataset, target_config.get("default")))
+        else:
+            coverage_target = float(target_config)
+        if not np.isfinite(coverage_target) or not 0.0 <= coverage_target <= 1.0:
+            raise ValueError("match_coverage_target values must lie in [0, 1].")
+        overlap_lower = max(0.0, coverage_target - tolerance)
+        overlap_upper = min(1.0, coverage_target + tolerance)
         matched_ecp = ecp[
             ecp.coverage.between(overlap_lower, overlap_upper)
         ].copy()
@@ -1419,17 +1431,12 @@ def coverage_matched_compare_points(
             raise ValueError(
                 f"The shared coverage window [{overlap_lower:g}, {overlap_upper:g}] "
                 f"for {dataset} leaves one method with no points; increase "
-                "match_coverage_tolerance or choose closer operating points."
+                "match_coverage_tolerance or change match_coverage_target."
             )
 
         ecp_coverage_mean = float(matched_ecp.coverage.mean())
         tscp_coverage_mean = float(matched_tscp.coverage.mean())
         cloud_coverage_gap = abs(ecp_coverage_mean - tscp_coverage_mean)
-        if cloud_coverage_gap > tolerance + 1e-12:
-            raise RuntimeError(
-                f"Shared-window matching produced coverage gap {cloud_coverage_gap:g} "
-                f"above tolerance {tolerance:g} for {dataset}."
-            )
         match_id = f"{dataset}:clouds"
         for method_name, selected in (("ecp", matched_ecp), ("tscp", matched_tscp)):
             for _, point in selected.iterrows():
@@ -1437,6 +1444,7 @@ def coverage_matched_compare_points(
                     "dataset": dataset,
                     "match_id": match_id,
                     "coverage_tolerance": tolerance,
+                    "coverage_target": coverage_target,
                     "method": method_name,
                     "variant": str(point.variant),
                     "budget": float(point.budget),
@@ -1449,15 +1457,15 @@ def coverage_matched_compare_points(
 
         ecp_size_mean = float(matched_ecp.average_size.mean())
         tscp_size_mean = float(matched_tscp.average_size.mean())
-        matched_coverage = 0.5 * (ecp_coverage_mean + tscp_coverage_mean)
         reduction = ecp_size_mean - tscp_size_mean
         summary_rows.append({
             "dataset": dataset,
             "match_id": match_id,
-            "selection": "shared_coverage_window",
+            "selection": "preselected_target_coverage_window",
             "ecp_budget": float(ecp.budget.iloc[0]),
             "tscp_budget": float(tscp.budget.iloc[0]),
             "coverage_tolerance": tolerance,
+            "coverage_target": coverage_target,
             "overlap_coverage_min": overlap_lower,
             "overlap_coverage_max": overlap_upper,
             "ecp_variant": ecp_name,
@@ -1468,7 +1476,7 @@ def coverage_matched_compare_points(
             "tscp_points": int(len(matched_tscp)),
             "tscp_mean_coverage": tscp_coverage_mean,
             "tscp_average_size": tscp_size_mean,
-            "matched_coverage": matched_coverage,
+            "matched_coverage": coverage_target,
             "coverage_gap": cloud_coverage_gap,
             "size_reduction": reduction,
             "size_reduction_percent": (
