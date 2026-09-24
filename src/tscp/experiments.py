@@ -1842,9 +1842,12 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
         size_diagnostics.to_csv(
             output / "model_ablation_size_diagnostics.csv", index=False,
         )
+        coverage_frame = frame[frame.panel == "coverage"].copy()
+        coverage_frame["coverage_gap"] = np.abs(
+            coverage_frame["coverage"] - coverage_frame["corrected_bound"]
+        )
         coverage_avg = _mean(
-            frame[frame.panel == "coverage"], ["dataset", "model", "x"],
-            ["coverage", "corrected_bound"],
+            coverage_frame, ["dataset", "model", "x"], ["coverage_gap"],
         )
         size_avg = _mean(
             frame[frame.panel == "size"], ["dataset", "model", "x"],
@@ -1855,19 +1858,19 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             dataset_size = size_avg[size_avg.dataset == dataset]
             for model, part in dataset_coverage.groupby("model"):
                 part = part.sort_values("x")
-                empirical_line, = axes[0, col].plot(
-                    part.x, part.coverage, marker="o", label=model,
-                )
-                axes[0, col].plot(
-                    part.x, part.corrected_bound,
-                    color=empirical_line.get_color(), linestyle="--", label="_nolegend_",
+                gap_line, = axes[0, col].plot(
+                    part.x, part.coverage_gap, marker="o", label=model,
                 )
                 size_part = dataset_size[dataset_size.model == model].sort_values("x")
                 axes[1, col].plot(
                     size_part.x, size_part.hard_accuracy, marker="o",
-                    color=empirical_line.get_color(), label=model,
+                    color=gap_line.get_color(), label=model,
                 )
-            axes[0, col].set(title=_dataset_display_name(dataset), xlabel="Number of test samples", ylabel="Coverage")
+            axes[0, col].set(
+                title=_dataset_display_name(dataset),
+                xlabel="Number of test samples",
+                ylabel=r"$|\mathrm{Coverage}_{emp}-\mathrm{Coverage}_{theory}|$",
+            )
             axes[1, col].set(
                 xlabel=r"Total calibration size $2n$",
                 ylabel=r"$\Pr\{|C_\delta(X)| \leq S(X)\}$",
@@ -1877,9 +1880,6 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             axes[1, col]._tscp_plot_scope = "size"
             axes[0, col].grid(alpha=0.25)
             axes[1, col].grid(alpha=0.25)
-            axes[0, col].plot(
-                [], [], color="black", linestyle="--", label="Theoretical",
-            )
     elif kind == "runtime":
         fig, axes = plt.subplots(2, 3, figsize=_plot_figsize(config, (15, 8)), squeeze=False)
         runtime_stats = frame.groupby(

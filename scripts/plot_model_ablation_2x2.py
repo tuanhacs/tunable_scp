@@ -78,15 +78,15 @@ def main() -> Path:
     parser.add_argument("--figsize", nargs=2, type=float, default=(12.0, 8.0))
     parser.add_argument(
         "--coverage-ylim", nargs=2, type=float, metavar=("MIN", "MAX"),
-        help="Shared y-axis limits for the two coverage panels.",
+        help="Shared y-axis limits for the two coverage-gap panels.",
     )
     parser.add_argument(
         "--regression-coverage-ylim", nargs=2, type=float, metavar=("MIN", "MAX"),
-        help="Y-axis limits for the regression coverage panel only.",
+        help="Y-axis limits for the regression coverage-gap panel only.",
     )
     parser.add_argument(
         "--classification-coverage-ylim", nargs=2, type=float, metavar=("MIN", "MAX"),
-        help="Y-axis limits for the classification coverage panel only.",
+        help="Y-axis limits for the classification coverage-gap panel only.",
     )
     parser.add_argument("--font-size", type=float, default=11.0)
     parser.add_argument("--dpi", type=int, default=180)
@@ -119,11 +119,16 @@ def main() -> Path:
     output.mkdir(parents=True, exist_ok=True)
     selected.to_csv(output / "model_ablation_2x2_input_points.csv", index=False)
 
-    coverage_summary = selected[selected.panel == "coverage"].groupby(
+    coverage_points = selected[selected.panel == "coverage"].copy()
+    coverage_points["coverage_gap"] = (
+        coverage_points["coverage"] - coverage_points["corrected_bound"]
+    ).abs()
+    coverage_summary = coverage_points.groupby(
         ["task", "dataset", "model", "panel", "x"], as_index=False,
     ).agg(
         empirical_coverage=("coverage", "mean"),
         theoretical_coverage=("corrected_bound", "mean"),
+        coverage_gap=("coverage_gap", "mean"),
         outer_seeds=("seed", "nunique"),
     )
     size_summary = selected[selected.panel == "size"].groupby(
@@ -151,12 +156,8 @@ def main() -> Path:
             model_part = model_part.sort_values("x")
             color = color_by_model[str(model)]
             axes[0, col].plot(
-                model_part.x, model_part.empirical_coverage,
+                model_part.x, model_part.coverage_gap,
                 color=color, marker="o", label=MODEL_LABELS.get(str(model), str(model)),
-            )
-            axes[0, col].plot(
-                model_part.x, model_part.theoretical_coverage,
-                color=color, linestyle="--", label="_nolegend_",
             )
             model_size = size_part[size_part.model == model].sort_values("x")
             axes[1, col].plot(
@@ -167,7 +168,9 @@ def main() -> Path:
         axes[0, col].set_xlabel("Number of test samples")
         axes[1, col].set_xlabel(r"Total calibration size $2n$")
         if col == 0:
-            axes[0, col].set_ylabel("Coverage")
+            axes[0, col].set_ylabel(
+                r"$|\mathrm{Coverage}_{emp}-\mathrm{Coverage}_{theory}|$"
+            )
             axes[1, col].set_ylabel(r"$\Pr\{|C_\delta(X)| \leq S(X)\}$")
         axes[1, col].set_ylim(0.0, 1.0)
         for ax in axes[:, col]:
@@ -187,10 +190,7 @@ def main() -> Path:
         Line2D([], [], color=color_by_model[model], marker="o", label=MODEL_LABELS.get(model, model))
         for model in models
     ]
-    top_handles = model_handles + [
-        Line2D([], [], color="black", linestyle="-", label="Empirical"),
-        Line2D([], [], color="black", linestyle="--", label="Theoretical"),
-    ]
+    top_handles = model_handles
     bottom_handles = model_handles
     axes[0, 1].legend(handles=top_handles, loc="center left", bbox_to_anchor=(1.04, 0.5), frameon=False)
     axes[1, 1].legend(handles=bottom_handles, loc="center left", bbox_to_anchor=(1.04, 0.5), frameon=False)
