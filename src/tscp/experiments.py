@@ -1371,11 +1371,70 @@ def loo_coverage_report_table(summary: pd.DataFrame) -> pd.DataFrame:
 def coverage_matched_compare_points(
     frame: pd.DataFrame, config: dict,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Symmetrically match paired eCP/TsCP batches with similar coverage."""
+    """Select independent eCP/TsCP clouds whose mean coverages match.
+
+    All points are retained whenever the two cloud means already differ by no
+    more than the configured tolerance. Otherwise, extreme coverage points are
+    trimmed one at a time from whichever cloud gives the largest reduction in
+    the mean-coverage gap. The two selected clouds need not have equal sizes.
+    """
     experiment = config.get("experiment", {})
     tolerance_config = experiment.get("match_coverage_tolerance", 0.005)
     point_rows = []
     summary_rows = []
+
+    def trim_to_mean_tolerance(
+        ecp_points: pd.DataFrame, tscp_points: pd.DataFrame, tolerance: float,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        selected_ecp = ecp_points.copy()
+        selected_tscp = tscp_points.copy()
+        numerical_margin = 1e-12
+
+        while True:
+            current_gap = abs(
+                float(selected_ecp.coverage.mean())
+                - float(selected_tscp.coverage.mean())
+            )
+            if current_gap <= tolerance + numerical_margin:
+                return selected_ecp, selected_tscp
+
+            ecp_is_higher = (
+                float(selected_ecp.coverage.mean())
+                > float(selected_tscp.coverage.mean())
+            )
+            candidates = []
+            if len(selected_ecp) > 1:
+                ecp_drop = (
+                    selected_ecp.coverage.idxmax()
+                    if ecp_is_higher else selected_ecp.coverage.idxmin()
+                )
+                candidate_ecp = selected_ecp.drop(index=ecp_drop)
+                candidate_gap = abs(
+                    float(candidate_ecp.coverage.mean())
+                    - float(selected_tscp.coverage.mean())
+                )
+                candidates.append((candidate_gap, "ecp", candidate_ecp, selected_tscp))
+            if len(selected_tscp) > 1:
+                tscp_drop = (
+                    selected_tscp.coverage.idxmin()
+                    if ecp_is_higher else selected_tscp.coverage.idxmax()
+                )
+                candidate_tscp = selected_tscp.drop(index=tscp_drop)
+                candidate_gap = abs(
+                    float(selected_ecp.coverage.mean())
+                    - float(candidate_tscp.coverage.mean())
+                )
+                candidates.append((candidate_gap, "tscp", selected_ecp, candidate_tscp))
+
+            improving = [item for item in candidates if item[0] < current_gap - numerical_margin]
+            if not improving:
+                raise ValueError(
+                    "Unable to select non-empty eCP/TsCP clouds with mean coverage "
+                    f"gap <= {tolerance:g}; the closest gap reached is {current_gap:g}."
+                )
+            _, _, selected_ecp, selected_tscp = min(
+                improving, key=lambda item: (item[0], item[1]),
+            )
 
     for dataset in config["datasets"]:
         dataset_points = frame[frame.dataset == dataset]
@@ -1390,7 +1449,7 @@ def coverage_matched_compare_points(
         tscp = dataset_points[dataset_points.variant == tscp_name]
         if ecp.budget.nunique() != 1 or tscp.budget.nunique() != 1:
             raise ValueError(
-                f"Symmetric coverage matching requires exactly one budget per method for {dataset}."
+                f"Coverage matching requires exactly one budget per method for {dataset}."
             )
         tolerance = float(
             tolerance_config.get(dataset, tolerance_config.get("default", 0.005))
@@ -1398,61 +1457,51 @@ def coverage_matched_compare_points(
         )
         if not np.isfinite(tolerance) or tolerance < 0:
             raise ValueError("match_coverage_tolerance must be finite and non-negative.")
-        paired = ecp.merge(
-            tscp, on=["seed", "batch"], suffixes=("_ecp", "_tscp"), validate="one_to_one",
-        )
-        paired["coverage_pair_gap"] = (paired.coverage_ecp - paired.coverage_tscp).abs()
-        matched = paired[paired.coverage_pair_gap <= tolerance].copy()
-        if matched.empty:
-            minimum_gap = float(paired.coverage_pair_gap.min())
-            raise ValueError(
-                f"No paired eCP/TsCP batch matches {dataset} within tolerance={tolerance:g}; "
-                f"the smallest observed gap is {minimum_gap:g}."
-            )
+        matched_ecp, matched_tscp = trim_to_mean_tolerance(ecp, tscp, tolerance)
 
-        match_id = f"{dataset}:paired"
-        for _, pair in matched.iterrows():
-            for method_name in ("ecp", "tscp"):
+        ecp_coverage_mean = float(matched_ecp.coverage.mean())
+        tscp_coverage_mean = float(matched_tscp.coverage.mean())
+        cloud_coverage_gap = abs(ecp_coverage_mean - tscp_coverage_mean)
+        match_id = f"{dataset}:clouds"
+        for method_name, selected in (("ecp", matched_ecp), ("tscp", matched_tscp)):
+            for _, point in selected.iterrows():
                 point_rows.append({
                     "dataset": dataset,
                     "match_id": match_id,
                     "coverage_tolerance": tolerance,
                     "method": method_name,
-                    "variant": str(pair[f"variant_{method_name}"]),
-                    "budget": float(pair[f"budget_{method_name}"]),
-                    "seed": int(pair.seed),
-                    "batch": int(pair.batch),
-                    "coverage": float(pair[f"coverage_{method_name}"]),
-                    "average_size": float(pair[f"average_size_{method_name}"]),
-                    "coverage_pair_gap": float(pair.coverage_pair_gap),
+                    "variant": str(point.variant),
+                    "budget": float(point.budget),
+                    "seed": int(point.seed),
+                    "batch": int(point.batch),
+                    "coverage": float(point.coverage),
+                    "average_size": float(point.average_size),
+                    "cloud_mean_coverage_gap": cloud_coverage_gap,
                 })
 
-        ecp_coverage_mean = float(matched.coverage_ecp.mean())
-        tscp_coverage_mean = float(matched.coverage_tscp.mean())
-        ecp_size_mean = float(matched.average_size_ecp.mean())
-        tscp_size_mean = float(matched.average_size_tscp.mean())
-        overlap_lower = max(float(matched.coverage_ecp.min()), float(matched.coverage_tscp.min()))
-        overlap_upper = min(float(matched.coverage_ecp.max()), float(matched.coverage_tscp.max()))
+        ecp_size_mean = float(matched_ecp.average_size.mean())
+        tscp_size_mean = float(matched_tscp.average_size.mean())
+        overlap_lower = max(float(matched_ecp.coverage.min()), float(matched_tscp.coverage.min()))
+        overlap_upper = min(float(matched_ecp.coverage.max()), float(matched_tscp.coverage.max()))
         reduction = ecp_size_mean - tscp_size_mean
         summary_rows.append({
             "dataset": dataset,
             "match_id": match_id,
-            "selection": "paired_batches_within_tolerance",
+            "selection": "independent_cloud_means_within_tolerance",
             "ecp_budget": float(ecp.budget.iloc[0]),
             "tscp_budget": float(tscp.budget.iloc[0]),
-            "matched_pairs": int(len(matched)),
             "coverage_tolerance": tolerance,
             "overlap_coverage_min": overlap_lower,
             "overlap_coverage_max": overlap_upper,
             "ecp_variant": ecp_name,
-            "ecp_points": int(len(matched)),
+            "ecp_points": int(len(matched_ecp)),
             "ecp_mean_coverage": ecp_coverage_mean,
             "ecp_average_size": ecp_size_mean,
             "tscp_variant": tscp_name,
-            "tscp_points": int(len(matched)),
+            "tscp_points": int(len(matched_tscp)),
             "tscp_mean_coverage": tscp_coverage_mean,
             "tscp_average_size": tscp_size_mean,
-            "coverage_gap": abs(ecp_coverage_mean - tscp_coverage_mean),
+            "coverage_gap": cloud_coverage_gap,
             "size_reduction": reduction,
             "size_reduction_percent": (
                 100.0 * reduction / ecp_size_mean if ecp_size_mean else np.nan

@@ -48,9 +48,16 @@ def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool(tmp_path):
     assert frame.loc[frame.method == "ecp", "delta"].isna().all()
     matched = summarize_coverage_matched_compare(frame, config)
     assert len(matched) == 1
-    assert (matched["selection"] == "paired_batches_within_tolerance").all()
-    assert (matched["ecp_points"] == matched["tscp_points"]).all()
+    assert (matched["selection"] == "independent_cloud_means_within_tolerance").all()
     assert (matched["coverage_gap"] <= matched["coverage_tolerance"]).all()
+
+    # Clouds are selected independently and do not need equal point counts.
+    one_ecp_index = frame.index[frame.method == "ecp"][0]
+    unequal_frame = frame.drop(index=one_ecp_index)
+    unequal_matched = summarize_coverage_matched_compare(unequal_frame, config)
+    assert int(unequal_matched.ecp_points.iloc[0]) == 2
+    assert int(unequal_matched.tscp_points.iloc[0]) == 3
+    assert unequal_matched.coverage_gap.iloc[0] <= unequal_matched.coverage_tolerance.iloc[0]
     make_figures(frame, config, tmp_path)
     for name in (
         "figure.pdf", "figure.png", "coverage_matched.pdf", "coverage_matched.png",
