@@ -28,5 +28,5 @@ seeds: [0]
 seeds_by_dataset:
   synthetic_regression: [0]
   california_housing: [0]
-  superconductivity: [0, 1, 2, 3, 4]
+  superconductivity: [0]
 datasets: [synthetic_regression, california_housing, superconductivity]
