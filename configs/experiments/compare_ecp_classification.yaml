@@ -10,7 +10,7 @@ experiment:
   name: compare_ecp_classification
   type: compare_ecp
   trials: 8000
-  batch_size: 4000
+  batch_size: 1000
   batches: 1000
   budget_steps: 1
   budget_ranges:
