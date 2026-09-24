@@ -3,9 +3,9 @@ task: regression
 experiment:
   name: compare_ecp_regression
   type: compare_ecp
-  trials: 6000
-  batch_size: 2000
-  batches: 500
+  trials: 8000
+  batch_size: 4000
+  batches: 1000
   budget_steps: 1
   budget_ranges:
     synthetic_regression: [15.0, 15.0]
