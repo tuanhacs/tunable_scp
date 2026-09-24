@@ -17,7 +17,10 @@ experiment:
     synthetic_regression: 0.954
     california_housing: 0.973
     superconductivity: 0.910
-  match_coverage_tolerance: 0.004
+  match_coverage_tolerance:
+    synthetic_regression: 0.004
+    california_housing: 0.004
+    superconductivity: 0.003
   variants:
     - { name: "TsCP", method: tscp, delta: 0.001 }
     - { name: "eCP", method: ecp }
