@@ -15,3 +15,5 @@ method:
     synthetic_regression: 1.0
     california_housing: 0.2
     superconductivity: 6.0
+data:
+  total_calibration_sizes: [1000, 2000, 3000, 4000, 5000, 6000]
