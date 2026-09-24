@@ -8,7 +8,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import LinearLocator, MaxNLocator
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -88,6 +88,18 @@ def main() -> Path:
         "--classification-coverage-ylim", nargs=2, type=float, metavar=("MIN", "MAX"),
         help="Y-axis limits for the classification coverage-gap panel only.",
     )
+    parser.add_argument(
+        "--size-ylim", nargs=2, type=float, metavar=("MIN", "MAX"),
+        help="Shared y-axis limits for the two size-control panels.",
+    )
+    parser.add_argument(
+        "--regression-size-ylim", nargs=2, type=float, metavar=("MIN", "MAX"),
+        help="Y-axis limits for the regression size-control panel only.",
+    )
+    parser.add_argument(
+        "--classification-size-ylim", nargs=2, type=float, metavar=("MIN", "MAX"),
+        help="Y-axis limits for the classification size-control panel only.",
+    )
     parser.add_argument("--font-size", type=float, default=11.0)
     parser.add_argument("--dpi", type=int, default=180)
     args = parser.parse_args()
@@ -95,6 +107,9 @@ def main() -> Path:
         ("--coverage-ylim", args.coverage_ylim),
         ("--regression-coverage-ylim", args.regression_coverage_ylim),
         ("--classification-coverage-ylim", args.classification_coverage_ylim),
+        ("--size-ylim", args.size_ylim),
+        ("--regression-size-ylim", args.regression_size_ylim),
+        ("--classification-size-ylim", args.classification_size_ylim),
     ):
         if limits is not None and limits[0] >= limits[1]:
             parser.error(f"{option} requires MIN < MAX")
@@ -172,11 +187,12 @@ def main() -> Path:
                 r"$|\mathrm{Coverage}_{emp}-\mathrm{Coverage}_{theory}|$"
             )
             axes[1, col].set_ylabel(r"$\Pr\{|C_\delta(X)| \leq S(X)\}$")
-        axes[1, col].set_ylim(0.0, 1.0)
         for ax in axes[:, col]:
             ax.grid(alpha=0.25)
             ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
             ax.yaxis.set_major_locator(MaxNLocator(nbins=4))
+        axes[0, col].xaxis.set_major_locator(LinearLocator(3))
+        axes[0, col].yaxis.set_major_locator(LinearLocator(3))
         task_limits = (
             args.regression_coverage_ylim
             if task == "regression"
@@ -185,6 +201,13 @@ def main() -> Path:
         coverage_limits = task_limits or args.coverage_ylim
         if coverage_limits is not None:
             axes[0, col].set_ylim(*coverage_limits)
+        task_size_limits = (
+            args.regression_size_ylim
+            if task == "regression"
+            else args.classification_size_ylim
+        )
+        size_limits = task_size_limits or args.size_ylim or (0.0, 1.0)
+        axes[1, col].set_ylim(*size_limits)
 
     model_handles = [
         Line2D([], [], color=color_by_model[model], marker="o", label=MODEL_LABELS.get(model, model))
