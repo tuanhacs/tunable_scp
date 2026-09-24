@@ -1656,6 +1656,100 @@ def summarize_coverage_matched_compare(frame: pd.DataFrame, config: dict) -> pd.
     return summary
 
 
+def coverage_matched_budget_points(
+    frame: pd.DataFrame, config: dict,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Match paired eCP/TsCP batches for every budget-function panel."""
+    experiment = config.get("experiment", {})
+    target_config = experiment.get("match_coverage_target")
+    tolerance_config = experiment.get("match_coverage_tolerance", 0.005)
+    if target_config is None:
+        raise ValueError(
+            "budget_ablation coverage matching requires experiment.match_coverage_target."
+        )
+
+    def resolve(value, dataset: str, default=None) -> float:
+        if isinstance(value, dict):
+            if dataset not in value and "default" not in value:
+                raise ValueError(f"Coverage matching has no value for dataset {dataset!r}.")
+            return float(value.get(dataset, value.get("default")))
+        if value is None:
+            return float(default)
+        return float(value)
+
+    point_rows = []
+    summary_rows = []
+    panels = frame[["dataset", "budget_type"]].drop_duplicates()
+    for dataset, budget_type in panels.itertuples(index=False, name=None):
+        part = frame[(frame.dataset == dataset) & (frame.budget_type == budget_type)]
+        ecp = part[part.method == "ecp"]
+        tscp = part[part.method == "tscp"]
+        tolerance = resolve(tolerance_config, dataset, 0.005)
+        target = resolve(target_config, dataset)
+        if not np.isfinite(tolerance) or tolerance < 0:
+            raise ValueError("match_coverage_tolerance must be finite and non-negative.")
+        if not np.isfinite(target) or not 0.0 <= target <= 1.0:
+            raise ValueError("match_coverage_target values must lie in [0, 1].")
+        lower = max(0.0, target - tolerance)
+        upper = min(1.0, target + tolerance)
+        paired = ecp.merge(
+            tscp,
+            on=["seed", "batch"],
+            suffixes=("_ecp", "_tscp"),
+            validate="one_to_one",
+        )
+        matched = paired[
+            paired.coverage_ecp.between(lower, upper)
+            & paired.coverage_tscp.between(lower, upper)
+        ].copy()
+        if matched.empty:
+            raise ValueError(
+                f"The shared coverage window [{lower:g}, {upper:g}] for "
+                f"{dataset}/{budget_type} leaves no paired batches."
+            )
+
+        match_id = f"{dataset}:{budget_type}:paired-target"
+        for _, pair in matched.iterrows():
+            for method_name in ("ecp", "tscp"):
+                point_rows.append({
+                    "dataset": dataset,
+                    "budget_type": budget_type,
+                    "budget_title": str(pair[f"budget_title_{method_name}"]),
+                    "match_id": match_id,
+                    "coverage_target": target,
+                    "coverage_tolerance": tolerance,
+                    "seed": int(pair.seed),
+                    "batch": int(pair.batch),
+                    "method": method_name,
+                    "coverage": float(pair[f"coverage_{method_name}"]),
+                    "average_size": float(pair[f"average_size_{method_name}"]),
+                    "average_budget": float(pair[f"average_budget_{method_name}"]),
+                })
+
+        ecp_mean_coverage = float(matched.coverage_ecp.mean())
+        tscp_mean_coverage = float(matched.coverage_tscp.mean())
+        ecp_mean_size = float(matched.average_size_ecp.mean())
+        tscp_mean_size = float(matched.average_size_tscp.mean())
+        summary_rows.append({
+            "dataset": dataset,
+            "budget_type": budget_type,
+            "match_id": match_id,
+            "selection": "paired_batches_in_target_window",
+            "coverage_target": target,
+            "coverage_tolerance": tolerance,
+            "matched_pairs": int(len(matched)),
+            "overlap_coverage_min": lower,
+            "overlap_coverage_max": upper,
+            "ecp_mean_coverage": ecp_mean_coverage,
+            "tscp_mean_coverage": tscp_mean_coverage,
+            "coverage_gap": abs(ecp_mean_coverage - tscp_mean_coverage),
+            "ecp_average_size": ecp_mean_size,
+            "tscp_average_size": tscp_mean_size,
+            "size_reduction": ecp_mean_size - tscp_mean_size,
+        })
+    return pd.DataFrame(point_rows), pd.DataFrame(summary_rows)
+
+
 def summarize_constraint_compare(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Aggregate paired size-control indicators within and across seeds."""
     groups = ["dataset", "method", "calibration_size", "seed"]
@@ -1965,16 +2059,26 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
                 ax.legend(loc="lower left")
         _save_figure(matched_fig, output, "coverage_matched", config)
     elif kind == "budget_ablation":
+        frame.sort_values(["dataset", "budget_type", "seed", "batch", "method"]).to_csv(
+            output / "budget_ablation_points.csv", index=False,
+        )
+        matched_points, matched_summary = coverage_matched_budget_points(frame, config)
+        matched_points.to_csv(output / "budget_ablation_coverage_matched.csv", index=False)
+        matched_summary.to_csv(output / "budget_ablation_coverage_matched_summary.csv", index=False)
         panel_order = [
             ("california_housing", "sigma"),
             ("california_housing", "log_sigma"),
             ("mnist", "entropy"),
             ("mnist", "margin"),
         ]
-        available = set(zip(frame.dataset, frame.budget_type))
+        available = set(zip(matched_points.dataset, matched_points.budget_type))
         panels = [panel for panel in panel_order if panel in available]
         if len(panels) != 4:
-            panels = list(frame[["dataset", "budget_type"]].drop_duplicates().itertuples(index=False, name=None))
+            panels = list(
+                matched_points[["dataset", "budget_type"]]
+                .drop_duplicates()
+                .itertuples(index=False, name=None)
+            )
         ncols = 2
         nrows = int(np.ceil(len(panels) / ncols))
         fig, axes = plt.subplots(
@@ -1985,7 +2089,10 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
         for index, (dataset, budget_type) in enumerate(panels):
             row, col = divmod(index, ncols)
             ax = axes[row, col]
-            part = frame[(frame.dataset == dataset) & (frame.budget_type == budget_type)]
+            part = matched_points[
+                (matched_points.dataset == dataset)
+                & (matched_points.budget_type == budget_type)
+            ]
             title = str(part.budget_title.iloc[0]) if "budget_title" in part else str(budget_type)
             ecp = part[part.method == "ecp"]
             tscp = part[part.method == "tscp"]

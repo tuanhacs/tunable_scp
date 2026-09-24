@@ -2,6 +2,7 @@ from pathlib import Path
 
 from tscp.config import load_config
 import numpy as np
+import pandas as pd
 
 from tscp.experiments import (
     collect_compare,
@@ -9,6 +10,7 @@ from tscp.experiments import (
     collect_loo_compare_ecp,
     collect_model_ablation,
     collect_self_validation,
+    coverage_matched_budget_points,
     coverage_matched_compare_points,
     loo_compare_report_table,
     loo_coverage_report_table,
@@ -27,6 +29,38 @@ def test_dataset_specific_seeds_fall_back_to_global_seeds():
     }
     assert seeds_for_dataset(config, "mnist") == [3, 4, 5]
     assert seeds_for_dataset(config, "covertype") == [0, 1]
+
+
+def test_budget_ablation_matching_keeps_only_shared_paired_batches():
+    rows = []
+    for batch, ecp_coverage, tscp_coverage in (
+        (0, 0.90, 0.91),
+        (1, 0.95, 0.94),
+        (2, 0.89, 0.96),
+    ):
+        for method, coverage in (("ecp", ecp_coverage), ("tscp", tscp_coverage)):
+            rows.append({
+                "dataset": "mnist",
+                "budget_type": "entropy",
+                "budget_title": "Entropy-based Budget",
+                "seed": 7,
+                "batch": batch,
+                "method": method,
+                "coverage": coverage,
+                "average_size": 3.0 if method == "ecp" else 2.0,
+                "average_budget": 3.2,
+            })
+    frame = pd.DataFrame(rows)
+    config = {
+        "experiment": {
+            "match_coverage_target": {"mnist": 0.90},
+            "match_coverage_tolerance": {"mnist": 0.02},
+        }
+    }
+    points, summary = coverage_matched_budget_points(frame, config)
+    assert set(points.batch) == {0}
+    assert points.groupby(["seed", "batch"])["method"].nunique().eq(2).all()
+    assert int(summary.matched_pairs.iloc[0]) == 1
 
 
 def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool(tmp_path):

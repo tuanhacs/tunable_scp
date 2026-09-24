@@ -11,6 +11,12 @@ experiment:
   batches_by_dataset:
     california_housing: 1000
     mnist: 1000
+  match_coverage_target:
+    california_housing: 0.976
+    mnist: 0.976
+  match_coverage_tolerance:
+    california_housing: 0.003
+    mnist: 0.003
   budget_variants_by_dataset:
     california_housing:
       - { name: sigma, title: "Sigma-based Budget", uncertainty: sigma }
@@ -19,6 +25,9 @@ experiment:
       - { name: entropy, title: "Entropy-based Budget", uncertainty: entropy }
       - { name: margin, title: "Margin-based Budget", uncertainty: margin }
 datasets: [california_housing, mnist]
+seeds_by_dataset:
+  california_housing: [0]
+  mnist: [0, 1, 2, 3, 4]
 method:
   score: one_minus_probability
   delta_by_dataset:
