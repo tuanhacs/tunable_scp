@@ -16,4 +16,4 @@ budget:
     mnist: 4
     covertype: 4
 data:
-  total_calibration_sizes: [1000, 2000, 3000, 4000, 5000, 6000]
+  total_calibration_sizes: [500, 1000, 2000, 3000, 4000, 5000, 6000]
