@@ -1373,11 +1373,12 @@ def coverage_matched_compare_points(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Select independent eCP/TsCP clouds whose mean coverages match.
 
-    A point is first retained only when its coverage lies within ``tolerance``
-    of the other cloud's observed coverage range. If the resulting cloud means
-    still differ by too much, extreme coverage points are trimmed one at a time
-    from whichever cloud gives the largest reduction in the mean-coverage gap.
-    The two selected clouds need not have equal sizes.
+    A point is first retained only when its coverage lies in the exact overlap
+    of the two observed coverage ranges (the shaded region in the matched
+    figure). If the resulting cloud means still differ by too much, extreme
+    coverage points are trimmed one at a time from whichever cloud gives the
+    largest reduction in the mean-coverage gap. The two selected clouds need
+    not have equal sizes.
     """
     experiment = config.get("experiment", {})
     tolerance_config = experiment.get("match_coverage_tolerance", 0.005)
@@ -1458,22 +1459,22 @@ def coverage_matched_compare_points(
         )
         if not np.isfinite(tolerance) or tolerance < 0:
             raise ValueError("match_coverage_tolerance must be finite and non-negative.")
-        matched_ecp = ecp[
-            ecp.coverage.between(
-                float(tscp.coverage.min()) - tolerance,
-                float(tscp.coverage.max()) + tolerance,
+        overlap_lower = max(float(ecp.coverage.min()), float(tscp.coverage.min()))
+        overlap_upper = min(float(ecp.coverage.max()), float(tscp.coverage.max()))
+        if overlap_lower > overlap_upper:
+            raise ValueError(
+                f"The eCP and TsCP coverage ranges for {dataset} do not overlap."
             )
+        matched_ecp = ecp[
+            ecp.coverage.between(overlap_lower, overlap_upper)
         ].copy()
         matched_tscp = tscp[
-            tscp.coverage.between(
-                float(ecp.coverage.min()) - tolerance,
-                float(ecp.coverage.max()) + tolerance,
-            )
+            tscp.coverage.between(overlap_lower, overlap_upper)
         ].copy()
         if matched_ecp.empty or matched_tscp.empty:
             raise ValueError(
-                f"The eCP and TsCP coverage clouds for {dataset} have no points "
-                f"within tolerance={tolerance:g} of the other cloud's range."
+                f"The eCP and TsCP coverage clouds for {dataset} have no observed "
+                "points in their common coverage range."
             )
         matched_ecp, matched_tscp = trim_to_mean_tolerance(
             matched_ecp, matched_tscp, tolerance,
@@ -1502,8 +1503,6 @@ def coverage_matched_compare_points(
         ecp_size_mean = float(matched_ecp.average_size.mean())
         tscp_size_mean = float(matched_tscp.average_size.mean())
         matched_coverage = 0.5 * (ecp_coverage_mean + tscp_coverage_mean)
-        overlap_lower = max(float(matched_ecp.coverage.min()), float(matched_tscp.coverage.min()))
-        overlap_upper = min(float(matched_ecp.coverage.max()), float(matched_tscp.coverage.max()))
         reduction = ecp_size_mean - tscp_size_mean
         summary_rows.append({
             "dataset": dataset,
@@ -1832,12 +1831,12 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             match = summary.iloc[0]
             ax.scatter(
                 ecp_points.coverage, ecp_points.average_size,
-                marker="x", color="tab:blue", s=30, alpha=0.85,
+                marker="x", color="tab:blue", s=18, alpha=0.35,
                 label="eCP" if col == 0 else "_nolegend_",
             )
             ax.scatter(
                 tscp_points.coverage, tscp_points.average_size,
-                marker="o", color="tab:orange", s=25, alpha=0.75,
+                marker="o", color="tab:orange", s=18, alpha=0.35,
                 label="TsCP" if col == 0 else "_nolegend_",
             )
             ax.plot(

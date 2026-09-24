@@ -9,6 +9,7 @@ from tscp.experiments import (
     collect_loo_compare_ecp,
     collect_model_ablation,
     collect_self_validation,
+    coverage_matched_compare_points,
     loo_compare_report_table,
     loo_coverage_report_table,
     make_figures,
@@ -50,6 +51,10 @@ def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool(tmp_path):
     assert len(matched) == 1
     assert (matched["selection"] == "independent_cloud_means_within_tolerance").all()
     assert (matched["coverage_gap"] <= matched["coverage_tolerance"]).all()
+    matched_points, matched_summary = coverage_matched_compare_points(frame, config)
+    lower = float(matched_summary.overlap_coverage_min.iloc[0])
+    upper = float(matched_summary.overlap_coverage_max.iloc[0])
+    assert matched_points.coverage.between(lower, upper).all()
 
     # Clouds are selected independently and do not need equal point counts.
     one_ecp_index = frame.index[frame.method == "ecp"][0]
