@@ -27,7 +27,7 @@ experiment:
 datasets: [california_housing, mnist]
 seeds_by_dataset:
   california_housing: [0]
-  mnist: [0, 1, 2, 3, 4, 5]
+  mnist: [0, 1, 2, 3, 4, 5, 6, 7, 8]
 method:
   score: one_minus_probability
   delta_by_dataset:

@@ -2081,6 +2081,44 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             )
         ncols = 2
         nrows = int(np.ceil(len(panels) / ncols))
+
+        # Raw point cloud before coverage matching, retained for diagnostics.
+        raw_fig, raw_axes = plt.subplots(
+            nrows, ncols,
+            figsize=_plot_figsize(config, (10.4, 4.5 * nrows)),
+            squeeze=False,
+        )
+        for index, (dataset, budget_type) in enumerate(panels):
+            row, col = divmod(index, ncols)
+            ax = raw_axes[row, col]
+            part = frame[
+                (frame.dataset == dataset)
+                & (frame.budget_type == budget_type)
+            ]
+            title = str(part.budget_title.iloc[0]) if "budget_title" in part else str(budget_type)
+            ecp = part[part.method == "ecp"]
+            tscp = part[part.method == "tscp"]
+            ax.scatter(
+                ecp.coverage, ecp.average_size,
+                marker="x", color="tab:blue", alpha=0.35,
+                label="eCP" if index == len(panels) - 1 else "_nolegend_",
+            )
+            ax.scatter(
+                tscp.coverage, tscp.average_size,
+                marker="o", color="tab:orange", alpha=0.35,
+                label="TsCP" if index == len(panels) - 1 else "_nolegend_",
+            )
+            ax.set_title(title)
+            ax.set_xlabel("Empirical coverage")
+            if col == 0:
+                ax.set_ylabel("Average set size")
+            ax.grid(alpha=0.25)
+            if index == len(panels) - 1:
+                ax.legend()
+        for index in range(len(panels), nrows * ncols):
+            raw_axes.flat[index].set_visible(False)
+        _save_figure(raw_fig, output, "budget_ablation_unmatched", config)
+
         fig, axes = plt.subplots(
             nrows, ncols,
             figsize=_plot_figsize(config, (10.4, 4.5 * nrows)),
@@ -2326,7 +2364,8 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
             handles, labels = ax.get_legend_handles_labels()
             if labels:
                 ax.legend(fontsize=7)
-    _save_figure(fig, output, "figure", config)
+    stems = ("figure", "budget_ablation_matched") if kind == "budget_ablation" else "figure"
+    _save_figure(fig, output, stems, config)
 
 
 def write_hard_table(frame: pd.DataFrame, output: Path) -> None:

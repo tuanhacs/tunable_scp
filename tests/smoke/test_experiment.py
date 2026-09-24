@@ -31,7 +31,7 @@ def test_dataset_specific_seeds_fall_back_to_global_seeds():
     assert seeds_for_dataset(config, "covertype") == [0, 1]
 
 
-def test_budget_ablation_matching_keeps_only_shared_paired_batches():
+def test_budget_ablation_matching_keeps_only_shared_paired_batches(tmp_path):
     rows = []
     for batch, ecp_coverage, tscp_coverage in (
         (0, 0.90, 0.91),
@@ -61,6 +61,24 @@ def test_budget_ablation_matching_keeps_only_shared_paired_batches():
     assert set(points.batch) == {0}
     assert points.groupby(["seed", "batch"])["method"].nunique().eq(2).all()
     assert int(summary.matched_pairs.iloc[0]) == 1
+    config.update({
+        "datasets": ["mnist"],
+        "plot": {"dpi": 72},
+        "experiment": {
+            **config["experiment"],
+            "type": "budget_ablation",
+        },
+    })
+    make_figures(frame, config, tmp_path)
+    for name in (
+        "budget_ablation_unmatched.pdf",
+        "budget_ablation_unmatched.png",
+        "budget_ablation_matched.pdf",
+        "budget_ablation_matched.png",
+        "figure.pdf",
+        "figure.png",
+    ):
+        assert (tmp_path / name).is_file()
 
 
 def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool(tmp_path):
