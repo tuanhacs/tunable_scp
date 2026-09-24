@@ -2379,6 +2379,8 @@ def write_hard_table(frame: pd.DataFrame, output: Path) -> None:
     table = frame.groupby(["calibration_size", "dataset"])["hard_accuracy"].mean().unstack("dataset")
     table.to_csv(output / "hard_constraint_table.csv")
     (output / "hard_constraint_table.tex").write_text(table.to_latex(float_format="%.3f"), encoding="utf-8")
+    print("\nHard-constraint satisfaction probability:")
+    print(table.to_string(float_format=lambda value: f"{value:.4f}"))
 
 
 def environment_metadata() -> dict:
