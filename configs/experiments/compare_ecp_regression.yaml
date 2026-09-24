@@ -18,11 +18,15 @@ experiment:
     california_housing: 0.973
     superconductivity: 0.910
   match_coverage_tolerance:
-    synthetic_regression: 0.004
-    california_housing: 0.004
+    synthetic_regression: 0.003
+    california_housing: 0.003
     superconductivity: 0.003
   variants:
     - { name: "TsCP", method: tscp, delta: 0.001 }
     - { name: "eCP", method: ecp }
 seeds: [0]
+seeds_by_dataset:
+  synthetic_regression: [0]
+  california_housing: [0]
+  superconductivity: [0, 1, 2, 3, 4]
 datasets: [synthetic_regression, california_housing, superconductivity]

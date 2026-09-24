@@ -38,6 +38,20 @@ def delta_for_dataset(config: dict, dataset: str) -> float:
     return float(by_dataset.get(dataset, method.get("delta", 0.1)))
 
 
+def seeds_for_dataset(config: dict, dataset: str) -> list[int]:
+    """Resolve dataset-specific seeds, falling back to the global seed list."""
+    by_dataset = config.get("seeds_by_dataset", {})
+    raw_seeds = by_dataset.get(dataset, config.get("seeds", []))
+    if not isinstance(raw_seeds, (list, tuple)) or not raw_seeds:
+        raise ValueError(
+            f"Seeds for dataset {dataset!r} must be a non-empty list."
+        )
+    seeds = [int(seed) for seed in raw_seeds]
+    if len(seeds) != len(set(seeds)):
+        raise ValueError(f"Seeds for dataset {dataset!r} must be unique.")
+    return seeds
+
+
 def budget_for_dataset(config: dict, dataset: str, kind: str | None = None, value: float | None = None) -> BudgetSpec:
     raw = dict(config.get("budget", {}))
     by_dataset = raw.pop("value_by_dataset", {})
@@ -349,7 +363,7 @@ def collect_compare(config: dict) -> pd.DataFrame:
         return np.asarray(values, dtype=float)
 
     for dataset in config["datasets"]:
-        for outer_seed in config["seeds"]:
+        for outer_seed in seeds_for_dataset(config, dataset):
             task, split, fitted = prepare(config, dataset, int(outer_seed))
             values = budget_values(dataset, task)
             total = int(config.get("data", {}).get("total_calibration_size", 2000))
@@ -1796,22 +1810,6 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
                 tscp_points.coverage, tscp_points.average_size,
                 marker="o", color="tab:orange", s=18, alpha=0.35,
                 label="TsCP" if col == 0 else "_nolegend_",
-            )
-            ax.plot(
-                [match.ecp_mean_coverage, match.tscp_mean_coverage],
-                [match.ecp_average_size, match.tscp_average_size],
-                color="black", linestyle="--", linewidth=1.2, alpha=0.75,
-                zorder=3,
-            )
-            ax.scatter(
-                [match.ecp_mean_coverage], [match.ecp_average_size],
-                marker="s", color="tab:green", s=90, zorder=4,
-                label="eCP mean" if col == 0 else "_nolegend_",
-            )
-            ax.scatter(
-                [match.tscp_mean_coverage], [match.tscp_average_size],
-                marker="D", color="tab:red", s=80, zorder=4,
-                label="TsCP mean" if col == 0 else "_nolegend_",
             )
             if match.overlap_coverage_min <= match.overlap_coverage_max:
                 ax.axvspan(

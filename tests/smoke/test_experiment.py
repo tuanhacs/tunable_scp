@@ -13,10 +13,20 @@ from tscp.experiments import (
     loo_compare_report_table,
     loo_coverage_report_table,
     make_figures,
+    seeds_for_dataset,
     summarize_coverage_matched_compare,
     summarize_constraint_compare,
     summarize_loo_compare,
 )
+
+
+def test_dataset_specific_seeds_fall_back_to_global_seeds():
+    config = {
+        "seeds": [0, 1],
+        "seeds_by_dataset": {"mnist": [3, 4, 5]},
+    }
+    assert seeds_for_dataset(config, "mnist") == [3, 4, 5]
+    assert seeds_for_dataset(config, "covertype") == [0, 1]
 
 
 def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool(tmp_path):
