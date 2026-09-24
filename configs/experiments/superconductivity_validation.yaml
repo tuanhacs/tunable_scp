@@ -2,6 +2,4 @@ defaults: [self_validation_regression.yaml]
 experiment:
   name: superconductivity_validation
   type: self_validation
-method:
-  delta: 2
 datasets: [superconductivity]
