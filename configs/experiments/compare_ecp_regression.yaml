@@ -11,8 +11,8 @@ experiment:
     synthetic_regression: [15.0, 15.0]
     california_housing: [3.0, 3.0]
     superconductivity: [40.0, 40.0]
-  # Pre-chosen target coverage for the matched comparison. Both methods retain
-  # points satisfying |coverage - target| <= match_coverage_tolerance.
+  # Pre-chosen target coverage for the matched comparison. A paired batch is
+  # retained only when both methods satisfy |coverage - target| <= tolerance.
   match_coverage_target:
     synthetic_regression: 0.954
     california_housing: 0.973

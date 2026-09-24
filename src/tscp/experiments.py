@@ -1373,9 +1373,9 @@ def coverage_matched_compare_points(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Select eCP/TsCP points around one pre-specified target coverage.
 
-    Both clouds use the same interval ``target +/- tolerance``. Point counts
-    may differ, but neither method influences the interval selected for the
-    other method.
+    Both methods use the same interval ``target +/- tolerance`` and the same
+    ``(seed, batch)`` draw. A batch is retained only when both methods fall in
+    the target interval, so the selected point clouds remain exactly paired.
     """
     experiment = config.get("experiment", {})
     tolerance_config = experiment.get("match_coverage_tolerance", 0.005)
@@ -1421,59 +1421,62 @@ def coverage_matched_compare_points(
             raise ValueError("match_coverage_target values must lie in [0, 1].")
         overlap_lower = max(0.0, coverage_target - tolerance)
         overlap_upper = min(1.0, coverage_target + tolerance)
-        matched_ecp = ecp[
-            ecp.coverage.between(overlap_lower, overlap_upper)
+        paired = ecp.merge(
+            tscp, on=["seed", "batch"], suffixes=("_ecp", "_tscp"),
+            validate="one_to_one",
+        )
+        matched = paired[
+            paired.coverage_ecp.between(overlap_lower, overlap_upper)
+            & paired.coverage_tscp.between(overlap_lower, overlap_upper)
         ].copy()
-        matched_tscp = tscp[
-            tscp.coverage.between(overlap_lower, overlap_upper)
-        ].copy()
-        if matched_ecp.empty or matched_tscp.empty:
+        if matched.empty:
             raise ValueError(
                 f"The shared coverage window [{overlap_lower:g}, {overlap_upper:g}] "
-                f"for {dataset} leaves one method with no points; increase "
+                f"for {dataset} leaves no paired batches; increase "
                 "match_coverage_tolerance or change match_coverage_target."
             )
 
-        ecp_coverage_mean = float(matched_ecp.coverage.mean())
-        tscp_coverage_mean = float(matched_tscp.coverage.mean())
+        ecp_coverage_mean = float(matched.coverage_ecp.mean())
+        tscp_coverage_mean = float(matched.coverage_tscp.mean())
         cloud_coverage_gap = abs(ecp_coverage_mean - tscp_coverage_mean)
-        match_id = f"{dataset}:clouds"
-        for method_name, selected in (("ecp", matched_ecp), ("tscp", matched_tscp)):
-            for _, point in selected.iterrows():
+        match_id = f"{dataset}:paired-target"
+        for _, pair in matched.iterrows():
+            for method_name in ("ecp", "tscp"):
                 point_rows.append({
                     "dataset": dataset,
                     "match_id": match_id,
                     "coverage_tolerance": tolerance,
                     "coverage_target": coverage_target,
                     "method": method_name,
-                    "variant": str(point.variant),
-                    "budget": float(point.budget),
-                    "seed": int(point.seed),
-                    "batch": int(point.batch),
-                    "coverage": float(point.coverage),
-                    "average_size": float(point.average_size),
+                    "variant": str(pair[f"variant_{method_name}"]),
+                    "budget": float(pair[f"budget_{method_name}"]),
+                    "seed": int(pair.seed),
+                    "batch": int(pair.batch),
+                    "coverage": float(pair[f"coverage_{method_name}"]),
+                    "average_size": float(pair[f"average_size_{method_name}"]),
                     "cloud_mean_coverage_gap": cloud_coverage_gap,
                 })
 
-        ecp_size_mean = float(matched_ecp.average_size.mean())
-        tscp_size_mean = float(matched_tscp.average_size.mean())
+        ecp_size_mean = float(matched.average_size_ecp.mean())
+        tscp_size_mean = float(matched.average_size_tscp.mean())
         reduction = ecp_size_mean - tscp_size_mean
         summary_rows.append({
             "dataset": dataset,
             "match_id": match_id,
-            "selection": "preselected_target_coverage_window",
+            "selection": "paired_batches_in_target_window",
             "ecp_budget": float(ecp.budget.iloc[0]),
             "tscp_budget": float(tscp.budget.iloc[0]),
             "coverage_tolerance": tolerance,
             "coverage_target": coverage_target,
+            "matched_pairs": int(len(matched)),
             "overlap_coverage_min": overlap_lower,
             "overlap_coverage_max": overlap_upper,
             "ecp_variant": ecp_name,
-            "ecp_points": int(len(matched_ecp)),
+            "ecp_points": int(len(matched)),
             "ecp_mean_coverage": ecp_coverage_mean,
             "ecp_average_size": ecp_size_mean,
             "tscp_variant": tscp_name,
-            "tscp_points": int(len(matched_tscp)),
+            "tscp_points": int(len(matched)),
             "tscp_mean_coverage": tscp_coverage_mean,
             "tscp_average_size": tscp_size_mean,
             "matched_coverage": coverage_target,

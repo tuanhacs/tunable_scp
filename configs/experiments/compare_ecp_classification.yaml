@@ -17,8 +17,8 @@ experiment:
     synthetic_classification: [16, 16]
     mnist: [4, 4]
     covertype: [4, 4]
-  # Edit these pre-chosen targets using the raw coverage-size plot. Both
-  # methods use the same target and tolerance within each dataset.
+  # Edit these pre-chosen targets using the raw coverage-size plot. A paired
+  # batch is retained only when both methods fall in the same target window.
   match_coverage_target:
     synthetic_classification: 0.90
     mnist: 0.98

@@ -49,7 +49,7 @@ def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool(tmp_path):
     assert frame.loc[frame.method == "ecp", "delta"].isna().all()
     matched = summarize_coverage_matched_compare(frame, config)
     assert len(matched) == 1
-    assert (matched["selection"] == "preselected_target_coverage_window").all()
+    assert (matched["selection"] == "paired_batches_in_target_window").all()
     assert (
         (matched["ecp_mean_coverage"] - matched["coverage_target"]).abs()
         <= matched["coverage_tolerance"]
@@ -62,13 +62,15 @@ def test_compare_ecp_outputs_repeated_batches_from_one_trial_pool(tmp_path):
     lower = float(matched_summary.overlap_coverage_min.iloc[0])
     upper = float(matched_summary.overlap_coverage_max.iloc[0])
     assert matched_points.coverage.between(lower, upper).all()
+    assert matched_points.groupby(["seed", "batch"])["method"].nunique().eq(2).all()
+    assert int(matched_summary.ecp_points.iloc[0]) == int(matched_summary.tscp_points.iloc[0])
 
-    # Clouds are selected independently and do not need equal point counts.
+    # Removing one method's batch removes that same batch from the paired match.
     one_ecp_index = frame.index[frame.method == "ecp"][0]
     unequal_frame = frame.drop(index=one_ecp_index)
     unequal_matched = summarize_coverage_matched_compare(unequal_frame, config)
     assert int(unequal_matched.ecp_points.iloc[0]) == 2
-    assert int(unequal_matched.tscp_points.iloc[0]) == 3
+    assert int(unequal_matched.tscp_points.iloc[0]) == 2
     assert unequal_matched.coverage_gap.iloc[0] <= 2 * unequal_matched.coverage_tolerance.iloc[0]
     make_figures(frame, config, tmp_path)
     for name in (
