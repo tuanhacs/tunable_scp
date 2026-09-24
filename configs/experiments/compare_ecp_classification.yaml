@@ -20,9 +20,9 @@ experiment:
   # Edit these pre-chosen targets using the raw coverage-size plot. A paired
   # batch is retained only when both methods fall in the same target window.
   match_coverage_target:
-    synthetic_classification: 0.972
-    mnist: 0.9875
-    covertype: 0.9975
+    synthetic_classification: 0.970
+    mnist: 0.986
+    covertype: 0.996
   match_coverage_tolerance:
     synthetic_classification: 0.003
     mnist: 0.003
