@@ -10,7 +10,7 @@ experiment:
     mnist: 1000
   batches_by_dataset:
     california_housing: 500
-    mnist: 1000
+    mnist: 2000
   match_coverage_target:
     california_housing:
       sigma: 0.976
