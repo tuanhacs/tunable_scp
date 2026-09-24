@@ -14,7 +14,7 @@ model:
     random_forest: { n_estimators: 200, min_samples_leaf: 2 }
     dnn: { hidden_layer_sizes: [32, 16], max_iter: 300 }
 method:
-  delta: 3.0
+  delta: 2.0
   epsilon: 0.005
 budget:
   value: 4
