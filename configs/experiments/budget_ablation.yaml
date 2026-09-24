@@ -9,11 +9,11 @@ experiment:
     california_housing: 1000
     mnist: 1000
   batches_by_dataset:
-    california_housing: 1000
+    california_housing: 500
     mnist: 1000
   match_coverage_target:
     california_housing: 0.976
-    mnist: 0.976
+    mnist: 0.978
   match_coverage_tolerance:
     california_housing: 0.003
     mnist: 0.003
@@ -27,7 +27,7 @@ experiment:
 datasets: [california_housing, mnist]
 seeds_by_dataset:
   california_housing: [0]
-  mnist: [0, 1, 2, 3, 4]
+  mnist: [0, 1, 2, 3, 4, 5]
 method:
   score: one_minus_probability
   delta_by_dataset:
