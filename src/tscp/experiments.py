@@ -1787,18 +1787,18 @@ def make_figures(frame: pd.DataFrame, config: dict, output: Path) -> None:
                 label="TsCP" if col == 0 else "_nolegend_",
             )
             ax.plot(
-                [match.matched_coverage, match.matched_coverage],
+                [match.ecp_mean_coverage, match.tscp_mean_coverage],
                 [match.ecp_average_size, match.tscp_average_size],
                 color="black", linestyle="--", linewidth=1.2, alpha=0.75,
                 zorder=3,
             )
             ax.scatter(
-                [match.matched_coverage], [match.ecp_average_size],
+                [match.ecp_mean_coverage], [match.ecp_average_size],
                 marker="s", color="tab:green", s=90, zorder=4,
                 label="eCP mean" if col == 0 else "_nolegend_",
             )
             ax.scatter(
-                [match.matched_coverage], [match.tscp_average_size],
+                [match.tscp_mean_coverage], [match.tscp_average_size],
                 marker="D", color="tab:red", s=80, zorder=4,
                 label="TsCP mean" if col == 0 else "_nolegend_",
             )
